@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuroFocus - Autoconhecimento & Rotina</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+              serif: ['"Lora"', 'serif'],
+            },
+            colors: {
+              neuro: {
+                base: '#0B0713',       /* Preto Neuro */
+                surface: '#15101F',    /* Slightly lighter for cards */
+                highlight: '#1E192B',  /* Input backgrounds/Hover */
+                primary: '#7A2BEF',    /* Roxo Primário */
+                secondary: '#B37CFF',  /* Roxo Secundário (Glow) */
+                deep: '#5325A1',       /* Roxo Profundo */
+                text: '#FFFFFF',       /* Branco Clean */
+                muted: '#AFAFAF',      /* Cinza Claro Textual */
+              }
+            },
+            boxShadow: {
+              'glow': '0 0 25px -5px rgba(122, 43, 239, 0.6)',
+              'glow-sm': '0 0 15px -3px rgba(179, 124, 255, 0.4)',
+              'glow-text': '0 0 10px rgba(179, 124, 255, 0.3)',
+            },
+            backgroundImage: {
+              'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+              'neuro-gradient': 'linear-gradient(135deg, #7A2BEF 0%, #5325A1 100%)',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #0B0713; /* Neuro Black */
+        color: #FFFFFF;
+      }
+      /* Custom scrollbar for webkit */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0B0713;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #5325A1;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #7A2BEF;
+      }
+      
+      /* Smooth transitions for inputs */
+      input, textarea, button {
+        transition: all 0.3s ease;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.86.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

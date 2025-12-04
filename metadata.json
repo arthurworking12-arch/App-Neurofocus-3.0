@@ -1,0 +1,7 @@
+{
+  "name": "NeuroFocus",
+  "description": "Uma plataforma minimalista de produtividade focada em organização, rotinas conscientes e autoconhecimento, integrada com IA e Gamificação.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
