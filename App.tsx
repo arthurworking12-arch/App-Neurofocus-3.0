@@ -33,20 +33,36 @@ const App: React.FC = () => {
   // Data State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  
+  // Recovery Mode State
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryConfirm, setRecoveryConfirm] = useState('');
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string|null>(null);
 
   // UI State
   const [toast, setToast] = useState<{ message: string; xp: number } | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+      })
+      .catch(err => {
+        console.error("Erro ao verificar sessão inicial:", err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -62,82 +78,90 @@ const App: React.FC = () => {
 
   // Fetch Data when session is active
   useEffect(() => {
-    if (session?.user) {
+    if (session?.user && !isRecoveryMode) {
       fetchUserProfile();
       fetchTasks();
     }
-  }, [session]);
+  }, [session, isRecoveryMode]);
 
   const fetchUserProfile = async () => {
     if (!session?.user) return;
     
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
 
-    if (error || !data) {
-      // Create default profile
-      const newProfile: UserProfile = {
-        id: session.user.id,
-        email: session.user.email!,
-        username: session.user.email?.split('@')[0],
-        level: 1,
-        current_xp: 0,
-        xp_to_next_level: 100,
-        streak_days: 0,
-        bio: ''
-      };
-      
-      setUserProfile(newProfile);
-      
-      // PERSISTENCE FIX: Save immediately to DB so it doesn't vanish on reload
-      await (supabase.from('profiles') as any).upsert(newProfile);
-    } else {
-      setUserProfile(data);
+      if (error || !data) {
+        // Create default profile
+        const newProfile: UserProfile = {
+          id: session.user.id,
+          email: session.user.email!,
+          username: session.user.email?.split('@')[0],
+          level: 1,
+          current_xp: 0,
+          xp_to_next_level: 100,
+          streak_days: 0,
+          bio: ''
+        };
+        
+        setUserProfile(newProfile);
+        
+        // PERSISTENCE FIX: Save immediately to DB so it doesn't vanish on reload
+        await (supabase.from('profiles') as any).upsert(newProfile);
+      } else {
+        setUserProfile(data);
+      }
+    } catch (e) {
+      console.error("Erro no fluxo de perfil:", e);
     }
   };
 
   const fetchTasks = async () => {
      if (!session?.user) return;
      
-     const { data } = await supabase
-       .from('tasks')
-       .select('*')
-       .eq('user_id', session.user.id);
-     
-     if (data) {
-        // --- LOGICA DE VIRADA DO DIA (RESET AUTOMÁTICO) ---
-        const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
-        const tasksToResetIds: string[] = [];
+     try {
+       const { data } = await supabase
+         .from('tasks')
+         .select('*')
+         .eq('user_id', session.user.id);
+       
+       if (data) {
+          // --- LOGICA DE VIRADA DO DIA (RESET AUTOMÁTICO) ---
+          const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+          const tasksToResetIds: string[] = [];
 
-        const processedTasks = data.map((task: Task) => {
-           // Verifica se é Rotina ou Hábito (Tarefas únicas "TODO" não resetam)
-           const isRecurring = task.type === TaskType.DAILY || task.type === TaskType.HABIT;
-           
-           if (isRecurring && task.is_completed) {
-              // Pega a data salva (removendo hora se houver, ex: 2025-12-01 10:00 -> 2025-12-01)
-              const taskDate = task.last_completed_date ? task.last_completed_date.split(' ')[0].split('T')[0] : null;
-              
-              // Se a data for diferente de hoje (ou nula), reseta
-              if (taskDate !== today) {
-                  tasksToResetIds.push(task.id);
-                  return { ...task, is_completed: false }; // Atualiza estado local
-              }
-           }
-           return task;
-        });
+          const processedTasks = data.map((task: Task) => {
+             // Verifica se é Rotina ou Hábito (Tarefas únicas "TODO" não resetam)
+             const isRecurring = task.type === TaskType.DAILY || task.type === TaskType.HABIT;
+             
+             if (isRecurring && task.is_completed) {
+                // Pega a data salva
+                const taskDate = task.last_completed_date ? task.last_completed_date.split(' ')[0].split('T')[0] : null;
+                
+                // Se a data for diferente de hoje (ou nula), reseta
+                if (taskDate !== today) {
+                    tasksToResetIds.push(task.id);
+                    return { ...task, is_completed: false }; // Atualiza estado local
+                }
+             }
+             return task;
+          });
 
-        setTasks(processedTasks);
+          setTasks(processedTasks);
 
-        // Se houver tarefas para resetar, atualiza no banco em lote
-        if (tasksToResetIds.length > 0) {
-           console.log("Resetando tarefas antigas:", tasksToResetIds);
-           await (supabase.from('tasks') as any)
-             .update({ is_completed: false })
-             .in('id', tasksToResetIds);
-        }
+          // Se houver tarefas para resetar, atualiza no banco em lote
+          if (tasksToResetIds.length > 0) {
+             console.log("Resetando tarefas antigas:", tasksToResetIds);
+             await (supabase.from('tasks') as any)
+               .update({ is_completed: false })
+               .in('id', tasksToResetIds);
+          }
+       }
+     } catch (e) {
+       console.error("Erro ao buscar tarefas:", e);
      }
   };
 
@@ -258,6 +282,32 @@ const App: React.FC = () => {
       .from('profiles') as any)
       .upsert(updatedProfile);
   };
+  
+  const handlePasswordRecoveryReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryLoading(true);
+    setRecoveryMessage(null);
+
+    if (recoveryPassword !== recoveryConfirm) {
+      setRecoveryMessage('As senhas não coincidem.');
+      setRecoveryLoading(false);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: recoveryPassword });
+      if (error) throw error;
+      setRecoveryMessage('Senha redefinida com sucesso! Redirecionando...');
+      setTimeout(() => {
+        setIsRecoveryMode(false);
+        window.location.hash = ''; // Clear hash
+      }, 2000);
+    } catch (err: any) {
+      setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -267,6 +317,53 @@ const App: React.FC = () => {
           alt="Loading..." 
           className="w-24 h-24 object-contain animate-pulse drop-shadow-[0_0_20px_rgba(122,43,239,0.5)]" 
         />
+      </div>
+    );
+  }
+
+  // --- RECOVERY MODE SCREEN ---
+  if (isRecoveryMode) {
+    return (
+      <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="max-w-md w-full bg-neuro-surface/50 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/5 p-8 relative z-10 animate-in fade-in zoom-in duration-300">
+           <h2 className="text-2xl font-bold text-white mb-6 text-center">Definir Nova Senha</h2>
+           <form onSubmit={handlePasswordRecoveryReset} className="space-y-4">
+             <div>
+                <label className="text-xs font-bold text-neuro-muted uppercase">Nova Senha</label>
+                <input 
+                  type="password" 
+                  value={recoveryPassword}
+                  onChange={e => setRecoveryPassword(e.target.value)}
+                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none"
+                  required 
+                  minLength={6}
+                />
+             </div>
+             <div>
+                <label className="text-xs font-bold text-neuro-muted uppercase">Confirmar Senha</label>
+                <input 
+                  type="password" 
+                  value={recoveryConfirm}
+                  onChange={e => setRecoveryConfirm(e.target.value)}
+                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none"
+                  required 
+                  minLength={6}
+                />
+             </div>
+             <button 
+               type="submit" 
+               disabled={recoveryLoading}
+               className="w-full py-3 bg-neuro-primary text-white rounded-xl font-bold shadow-glow hover:bg-neuro-secondary transition-all"
+             >
+               {recoveryLoading ? 'Salvando...' : 'Redefinir Senha'}
+             </button>
+             {recoveryMessage && (
+               <p className={`text-center text-sm font-medium ${recoveryMessage.includes('sucesso') ? 'text-green-400' : 'text-red-400'}`}>
+                 {recoveryMessage}
+               </p>
+             )}
+           </form>
+        </div>
       </div>
     );
   }

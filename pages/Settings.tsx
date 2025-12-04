@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
-import { User, Mail, Save, Award, Zap, Quote, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
+import { User, Mail, Save, Award, Zap, Quote, Loader2, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface SettingsProps {
   user: UserProfile;
@@ -8,24 +9,64 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
+  // Profile State
   const [username, setUsername] = useState(user.username || '');
   const [bio, setBio] = useState(user.bio || '');
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Password State
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passSaving, setPassSaving] = useState(false);
+  const [passMessage, setPassMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setMessage(null);
+    setProfileSaving(true);
+    setProfileMessage(null);
     try {
       await onUpdateProfile(username, bio);
-      setMessage('Perfil atualizado com sucesso!');
-      setTimeout(() => setMessage(null), 3000);
+      setProfileMessage('Perfil atualizado com sucesso!');
+      setTimeout(() => setProfileMessage(null), 3000);
     } catch (error) {
       console.error(error);
-      setMessage('Erro ao atualizar perfil.');
+      setProfileMessage('Erro ao atualizar perfil.');
     } finally {
-      setSaving(false);
+      setProfileSaving(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassSaving(true);
+    setPassMessage(null);
+
+    if (newPassword !== confirmPassword) {
+        setPassMessage({ text: 'As senhas não coincidem.', type: 'error' });
+        setPassSaving(false);
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        setPassMessage({ text: 'A senha deve ter no mínimo 6 caracteres.', type: 'error' });
+        setPassSaving(false);
+        return;
+    }
+
+    try {
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        
+        if (error) throw error;
+
+        setPassMessage({ text: 'Senha atualizada com segurança.', type: 'success' });
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => setPassMessage(null), 4000);
+    } catch (error: any) {
+        setPassMessage({ text: error.message || 'Erro ao alterar senha.', type: 'error' });
+    } finally {
+        setPassSaving(false);
     }
   };
 
@@ -34,14 +75,16 @@ const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
            <h2 className="text-3xl font-serif font-bold text-white mb-2">Meu Perfil</h2>
-           <p className="text-neuro-muted">Personalize sua identidade e acompanhe sua jornada.</p>
+           <p className="text-neuro-muted">Personalize sua identidade e segurança.</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Form */}
-        <div className="lg:col-span-2 space-y-6">
-          <form onSubmit={handleSubmit} className="bg-neuro-surface p-8 rounded-3xl border border-white/5 shadow-sm space-y-6">
+        {/* Left Column: Forms */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* PROFILE FORM */}
+          <form onSubmit={handleProfileSubmit} className="bg-neuro-surface p-8 rounded-3xl border border-white/5 shadow-sm space-y-6">
             <h3 className="text-xl font-serif font-semibold text-white mb-4 flex items-center gap-2">
                <User className="text-neuro-primary" size={24} />
                Dados Pessoais
@@ -83,16 +126,65 @@ const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
             <div className="pt-4 flex items-center gap-4">
               <button 
                 type="submit" 
-                disabled={saving}
+                disabled={profileSaving}
                 className="bg-neuro-primary hover:bg-neuro-secondary text-white px-6 py-3 rounded-xl shadow-glow flex items-center gap-2 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed border border-neuro-secondary/20"
               >
-                 {saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                 {profileSaving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
                  Salvar Alterações
               </button>
-              {message && (
-                <span className={`text-sm font-medium animate-in fade-in ${message.includes('Erro') ? 'text-red-400' : 'text-neuro-secondary'}`}>
-                   {message}
+              {profileMessage && (
+                <span className={`text-sm font-medium animate-in fade-in ${profileMessage.includes('Erro') ? 'text-red-400' : 'text-neuro-secondary'}`}>
+                   {profileMessage}
                 </span>
+              )}
+            </div>
+          </form>
+
+          {/* PASSWORD FORM */}
+          <form onSubmit={handlePasswordSubmit} className="bg-neuro-surface p-8 rounded-3xl border border-white/5 shadow-sm space-y-6">
+             <h3 className="text-xl font-serif font-semibold text-white mb-4 flex items-center gap-2">
+               <Lock className="text-neuro-secondary" size={24} />
+               Segurança
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <label className="text-xs font-bold text-neuro-muted uppercase tracking-wider ml-1">Nova Senha</label>
+                    <input 
+                        type="password" 
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full px-4 py-3 bg-neuro-base border border-neuro-highlight rounded-xl focus:outline-none focus:ring-2 focus:ring-neuro-secondary/50 focus:border-neuro-secondary text-white placeholder:text-gray-700"
+                        placeholder="••••••••"
+                    />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-xs font-bold text-neuro-muted uppercase tracking-wider ml-1">Confirmar Senha</label>
+                    <input 
+                        type="password" 
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full px-4 py-3 bg-neuro-base border border-neuro-highlight rounded-xl focus:outline-none focus:ring-2 focus:ring-neuro-secondary/50 focus:border-neuro-secondary text-white placeholder:text-gray-700"
+                        placeholder="••••••••"
+                    />
+                </div>
+            </div>
+
+            <div className="pt-2 flex items-center gap-4">
+              <button 
+                type="submit" 
+                disabled={passSaving || !newPassword}
+                className="bg-transparent border border-neuro-secondary/30 text-neuro-secondary hover:bg-neuro-secondary hover:text-white px-6 py-3 rounded-xl flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                 {passSaving ? <Loader2 className="animate-spin" size={20} /> : <Lock size={18} />}
+                 Atualizar Senha
+              </button>
+              
+              {passMessage && (
+                <div className={`flex items-center gap-2 text-sm font-medium animate-in fade-in ${passMessage.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>
+                   {passMessage.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+                   {passMessage.text}
+                </div>
               )}
             </div>
           </form>

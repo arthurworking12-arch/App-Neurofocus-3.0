@@ -1,7 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { Task, UserProfile } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Função auxiliar para obter a instância da IA de forma segura
+const getAIClient = () => {
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
 
 export const getRoutineSuggestions = async (
   completedTasks: Task[],
@@ -9,6 +12,7 @@ export const getRoutineSuggestions = async (
   userGoal: string = "melhorar produtividade e foco"
 ): Promise<string> => {
   try {
+    const ai = getAIClient();
     const completedTitles = completedTasks.map(t => t.title).join(", ");
     const pendingTitles = pendingTasks.map(t => t.title).join(", ");
 
@@ -58,6 +62,7 @@ export const getRoutineSuggestions = async (
 };
 
 export const createChatSession = (user: UserProfile, tasks: Task[]) => {
+  const ai = getAIClient();
   const pendingTasks = tasks.filter(t => !t.is_completed).map(t => t.title).join(", ");
   const completedTasks = tasks.filter(t => t.is_completed).map(t => t.title).join(", ");
 

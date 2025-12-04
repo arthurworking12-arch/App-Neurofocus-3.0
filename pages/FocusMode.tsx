@@ -23,8 +23,12 @@ const FocusMode: React.FC = () => {
     } else if (timeLeft === 0) {
       setIsActive(false);
       // Play sound or notification here
-      if(Notification.permission === 'granted') {
-          new Notification("NeuroFocus", { body: "Tempo esgotado!" });
+      if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification("NeuroFocus", { body: "Tempo esgotado!" });
+          } catch (e) {
+            console.warn("Notificação falhou", e);
+          }
       }
     }
     return () => {
@@ -33,8 +37,8 @@ const FocusMode: React.FC = () => {
   }, [isActive, timeLeft]);
 
   useEffect(() => {
-      if(Notification.permission === 'default') {
-          Notification.requestPermission();
+      if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(err => console.log("Erro ao pedir permissão de notificação", err));
       }
   }, []);
 
