@@ -8,11 +8,11 @@ import Insights from './pages/Insights';
 import NeuroChat from './pages/NeuroChat';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
-import NeuroSetup from './components/NeuroSetup'; // Import New Component
+import NeuroSetup from './components/NeuroSetup';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { UserProfile, Task, TaskType, TaskPriority } from './types';
 import { Session } from '@supabase/supabase-js';
-import { Trophy, Zap, Crown, Star } from 'lucide-react';
+import { Trophy, Zap, Crown } from 'lucide-react';
 
 const MOTIVATIONAL_QUOTES = [
   "Dopamina liberada! O cérebro agradece.",
@@ -44,7 +44,7 @@ const App: React.FC = () => {
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string|null>(null);
 
-  // Toast agora suporta tipos diferentes para feedbacks visuais
+  // Toast
   const [toast, setToast] = useState<{ message: string; xp: number; type: 'normal' | 'critical' | 'jackpot' } | null>(null);
 
   useEffect(() => {
@@ -95,8 +95,13 @@ const App: React.FC = () => {
         .eq('id', session.user.id)
         .single();
 
-      if (error || !data) {
-        // Create Default Profile
+      if (error && error.code !== 'PGRST116') {
+         console.error("Erro ao buscar perfil:", error.message);
+         return; 
+      }
+
+      if (!data) {
+        // Create Default Profile only if it truly doesn't exist
         const emailPrefix = session.user.email?.split('@')[0] || 'Membro';
         const newProfile: UserProfile = {
           id: session.user.id,
@@ -107,25 +112,28 @@ const App: React.FC = () => {
           xp_to_next_level: 100,
           streak_days: 0,
           bio: '',
-          chronotype: 'bear'
+          chronotype: null // Explicitly null to trigger onboarding
         };
         
+        // Optimistic update
         setUserProfile(newProfile);
-        setShowSetup(true); // New User -> Trigger Setup
+        setShowSetup(true); 
         
-        await (supabase.from('profiles') as any).upsert(newProfile);
+        const { error: insertError } = await (supabase.from('profiles') as any).upsert(newProfile);
+        if (insertError) console.error("Erro ao criar perfil inicial:", insertError.message);
+
       } else {
         setUserProfile(data);
         
-        // Check if user is "unconfigured" (Name matches email prefix)
-        // This forces existing users who haven't set up to see the screen too
-        const emailPrefix = data.email.split('@')[0];
-        if (data.username === emailPrefix) {
+        // Critical Check: If chronotype is null, trigger setup
+        if (!data.chronotype) {
            setShowSetup(true);
+        } else {
+           setShowSetup(false);
         }
       }
-    } catch (e) {
-      console.error("Erro no fluxo de perfil:", e);
+    } catch (e: any) {
+      console.error("Exceção no fluxo de perfil:", e.message || e);
     }
   };
 
@@ -148,9 +156,10 @@ const App: React.FC = () => {
              if (isRecurring && task.is_completed) {
                 const taskDate = task.last_completed_date ? task.last_completed_date.split(' ')[0].split('T')[0] : null;
                 
+                // Reset daily tasks only if the date is NOT today
                 if (taskDate !== today) {
                     tasksToResetIds.push(task.id);
-                    // Reseta os pontos para o base APENAS quando vira o dia
+                    // Reset points to base value for the new day roll
                     const basePoints = task.type === TaskType.HABIT ? 10 : 20;
                     return { ...task, is_completed: false, points: basePoints };
                 }
@@ -161,28 +170,43 @@ const App: React.FC = () => {
           setTasks(processedTasks);
 
           if (tasksToResetIds.length > 0) {
+             // Batch update to reset daily tasks
              await (supabase.from('tasks') as any)
-               .update({ is_completed: false, points: 20 }) 
+               .update({ is_completed: false, points: 20 }) // Reset points too so RNG can run again tomorrow
                .in('id', tasksToResetIds);
           }
        }
-     } catch (e) {
-       console.error("Erro ao buscar tarefas:", e);
+     } catch (e: any) {
+       console.error("Erro ao buscar tarefas:", e.message || e);
      }
   };
 
   const handleSetupComplete = async (username: string, chronotype: string) => {
     if (!userProfile) return;
 
-    const updatedProfile = { ...userProfile, username, chronotype: chronotype as any };
+    // Create the updated profile object locally
+    const updatedProfile = { 
+        ...userProfile, 
+        username, 
+        chronotype: chronotype as any 
+    };
+
+    // Optimistic Update
     setUserProfile(updatedProfile);
     setShowSetup(false);
 
     try {
-      await (supabase.from('profiles') as any).upsert(updatedProfile);
+      // Use UPDATE specifically for the changed fields to avoid conflicts
+      const { error } = await (supabase.from('profiles') as any)
+        .update({ username, chronotype })
+        .eq('id', userProfile.id);
+      
+      if (error) throw error;
+      
       setToast({ message: "Sistema Neural Calibrado", xp: 0, type: 'critical' });
-    } catch (e) {
-      console.error("Erro ao salvar setup:", e);
+    } catch (e: any) {
+      // Log full error message
+      console.error("Erro fatal ao salvar setup:", e.message || e);
     }
   };
 
@@ -217,12 +241,19 @@ const App: React.FC = () => {
     let xpType: 'normal' | 'critical' | 'jackpot' = 'normal';
 
     if (updatedStatus) {
+        // ANTI-FARM LOGIC:
+        // If task was already completed today (taskLastDate === today), we reuse the EXISTING points.
+        // We do NOT roll the dice again.
         if (taskLastDate === today) {
+            finalPoints = task.points; // Keep existing points
+            
+            // Re-calculate type just for visual feedback based on points
             const base = task.type === TaskType.HABIT ? 10 : 20;
             if (finalPoints >= base + 50) xpType = 'jackpot';
             else if (finalPoints >= base * 2) xpType = 'critical';
             else xpType = 'normal';
         } else {
+            // NEW COMPLETION FOR TODAY: Roll the dice!
             const basePoints = task.type === TaskType.HABIT ? 10 : 20;
             const rng = Math.random() * 100;
             
@@ -239,38 +270,48 @@ const App: React.FC = () => {
         }
     }
 
+    // Optimistic Update
     setTasks(tasks.map(t => t.id === task.id ? { 
         ...t, 
         is_completed: updatedStatus,
         points: finalPoints,
+        // If unchecking, we KEEP the last_completed_date as is, so the system knows it was touched today.
+        // Only update date if checking.
         last_completed_date: updatedStatus ? today : t.last_completed_date 
     } : t));
 
+    // Database Update
     if (updatedStatus) {
        await (supabase.from('tasks') as any).update({ 
           is_completed: true,
           last_completed_date: today,
-          points: finalPoints 
+          points: finalPoints // Save the rolled points
        }).eq('id', task.id);
     } else {
        await (supabase.from('tasks') as any).update({ 
           is_completed: false,
+          // We DO NOT reset points here. We keep the "rolled" value in DB.
+          // We DO NOT clear the date.
        }).eq('id', task.id);
     }
 
+    // XP & Level Logic
     if (userProfile) {
       let newLevel = userProfile.level;
       let newCurrentXp = userProfile.current_xp;
       
+      // Dynamic Level Threshold: Level * 100
+      // Eg: Level 1 needs 100xp. Level 2 needs 200xp.
       let xpThreshold = newLevel * 100;
 
       if (updatedStatus) {
         newCurrentXp += finalPoints;
         
+        // Level Up Loop
         while (newCurrentXp >= xpThreshold) {
           newCurrentXp = newCurrentXp - xpThreshold;
           newLevel += 1;
-          xpThreshold = newLevel * 100; 
+          xpThreshold = newLevel * 100; // Update threshold for next level
         }
 
         let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
@@ -280,7 +321,10 @@ const App: React.FC = () => {
         setToast({ message, xp: finalPoints, type: xpType });
 
       } else {
+        // Level Down Logic (Undo)
         newCurrentXp -= finalPoints;
+        
+        // Handle negative XP (level down)
         while (newCurrentXp < 0) {
            if (newLevel > 1) {
               newLevel -= 1;
@@ -322,9 +366,10 @@ const App: React.FC = () => {
     const updatedProfile = { ...userProfile, username, bio, chronotype: chronotype as any };
     setUserProfile(updatedProfile);
 
-    await (supabase
-      .from('profiles') as any)
-      .upsert(updatedProfile);
+    // Use Update to be safe
+    await (supabase.from('profiles') as any)
+      .update({ username, bio, chronotype })
+      .eq('id', userProfile.id);
   };
   
   const handlePasswordRecoveryReset = async (e: React.FormEvent) => {
@@ -344,7 +389,7 @@ const App: React.FC = () => {
       setRecoveryMessage('Senha redefinida com sucesso! Redirecionando...');
       setTimeout(() => {
         setIsRecoveryMode(false);
-        window.location.hash = '';
+        window.location.hash = ''; // Clear any hash fragment
       }, 2000);
     } catch (err: any) {
       setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
@@ -483,7 +528,7 @@ const App: React.FC = () => {
 
   return (
     <>
-       {/* SHOW SETUP IF NEW USER */}
+       {/* SHOW SETUP ONLY IF CHRONOTYPE IS NULL OR UNDEFINED */}
        {showSetup && userProfile && (
           <NeuroSetup user={userProfile} onComplete={handleSetupComplete} />
        )}

@@ -1,3 +1,4 @@
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -7,7 +8,7 @@ export interface UserProfile {
   current_xp: number;
   xp_to_next_level: number;
   streak_days: number;
-  chronotype?: 'lion' | 'bear' | 'wolf' | 'dolphin'; // Novo campo: Cronotipo
+  chronotype?: 'lion' | 'bear' | 'wolf' | 'dolphin' | null;
 }
 
 export enum TaskType {
