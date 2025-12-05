@@ -7,6 +7,7 @@ export interface UserProfile {
   current_xp: number;
   xp_to_next_level: number;
   streak_days: number;
+  chronotype?: 'lion' | 'bear' | 'wolf' | 'dolphin'; // Novo campo: Cronotipo
 }
 
 export enum TaskType {
@@ -29,11 +30,11 @@ export interface Task {
   is_completed: boolean;
   type: TaskType;
   priority: TaskPriority;
-  due_date?: string; // Data específica para TODOs (ISO string YYYY-MM-DD)
-  time?: string; // Horário "HH:MM"
-  repeat_days?: string[]; // Array de dias ['seg', 'ter', etc] para HABIT/DAILY
-  last_completed_date?: string; // Data da última conclusão YYYY-MM-DD
-  energy_level?: 'high' | 'medium' | 'low'; // Nível de energia previsto
+  due_date?: string;
+  time?: string;
+  repeat_days?: string[];
+  last_completed_date?: string;
+  energy_level?: 'high' | 'medium' | 'low';
   points: number;
   created_at: string;
 }

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Task, TaskType } from '../types';
-import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, AlertTriangle, TrendingDown, ArrowRight } from 'lucide-react';
+import { Task, TaskType, UserProfile } from '../types';
+import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown } from 'lucide-react';
 
 interface RoutinesProps {
   tasks: Task[];
+  user: UserProfile; // Added UserProfile prop
   onAddTask: (taskData: Partial<Task>) => Promise<void>;
   onToggleTask: (task: Task) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
@@ -19,12 +20,45 @@ const DAYS_OF_WEEK = [
   { id: 'dom', label: 'D' },
 ];
 
-const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onDeleteTask }) => {
+// Dados dos Cronotipos
+const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, lowEnergyEnd: number, peakTime: string, message: string }> = {
+  lion: { 
+    label: 'Leão (Matutino)', 
+    lowEnergyStart: 18, // Começa a cair às 18h
+    lowEnergyEnd: 24,   // Vai até o fim do dia
+    peakTime: '07:00',
+    message: 'Leões funcionam com o sol. Tentar focar pesado à noite vai contra sua biologia.'
+  },
+  bear: { 
+    label: 'Urso (Solar)', 
+    lowEnergyStart: 14, 
+    lowEnergyEnd: 16, 
+    peakTime: '10:00',
+    message: 'Ursos seguem o sol e têm o famoso "post-lunch dip".'
+  },
+  wolf: { 
+    label: 'Lobo (Noturno)', 
+    lowEnergyStart: 6, 
+    lowEnergyEnd: 12, // Manhã é difícil (estendido até meio dia)
+    peakTime: '20:00',
+    message: 'Lobos demoram a "ligar" o cérebro pela manhã.'
+  },
+  dolphin: { 
+    label: 'Golfinho', 
+    lowEnergyStart: 13, 
+    lowEnergyEnd: 15, 
+    peakTime: '10:00',
+    message: 'Golfinhos são sensíveis, a tarde pode ser dispersa.'
+  }
+};
+
+const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTask, onDeleteTask }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   // Neuro-Biorhythm State
   const [showEnergyWarning, setShowEnergyWarning] = useState(false);
   const [pendingTaskData, setPendingTaskData] = useState<Partial<Task> | null>(null);
+  const [energyContext, setEnergyContext] = useState<any>(null);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -42,6 +76,7 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
     setIsModalOpen(false);
     setShowEnergyWarning(false);
     setPendingTaskData(null);
+    setEnergyContext(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,14 +91,19 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
       due_date: type === TaskType.TODO ? dueDate : undefined
     };
 
-    // --- NEURO-BIORRITMO CHECK ---
-    // Se tiver horário definido, verifica se cai na "Janela de Baixa Energia" (13h - 15h)
-    if (time) {
+    // --- NEURO-BIORRITMO CHECK (Dinâmico) ---
+    const userChronotype = user.chronotype || 'bear'; // Default
+    const chronoData = CHRONOTYPE_DATA[userChronotype];
+
+    if (time && chronoData) {
         const hour = parseInt(time.split(':')[0], 10);
-        if (hour >= 13 && hour < 15) {
+        
+        // Verifica se está na janela de baixa energia do cronotipo
+        if (hour >= chronoData.lowEnergyStart && hour < chronoData.lowEnergyEnd) {
             setPendingTaskData(taskPayload);
+            setEnergyContext(chronoData);
             setShowEnergyWarning(true);
-            return; // Interrompe o envio
+            return; // Interrompe envio
         }
     }
 
@@ -73,9 +113,9 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
   };
 
   const handleConfirmOptimization = async () => {
-      if (pendingTaskData) {
-          // Muda para 16:00 (Horário de Pico simulado)
-          await onAddTask({ ...pendingTaskData, time: '16:00', energy_level: 'high' });
+      if (pendingTaskData && energyContext) {
+          // Muda para o horário de pico sugerido pelo cronotipo
+          await onAddTask({ ...pendingTaskData, time: energyContext.peakTime, energy_level: 'high' });
           resetForm();
       }
   };
@@ -96,7 +136,6 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
     }
   };
 
-  // Sort tasks: Time (if exists) -> Incomplete first
   const sortedTasks = [...tasks].sort((a, b) => {
     if (a.is_completed !== b.is_completed) return a.is_completed ? 1 : -1;
     if (a.time && b.time) return a.time.localeCompare(b.time);
@@ -216,32 +255,18 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
            <div className="bg-neuro-surface rounded-3xl shadow-2xl shadow-neuro-base border border-white/10 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 relative">
               
               {/* --- NEURO-BIORRITMO ALERT OVERLAY --- */}
-              {showEnergyWarning && (
-                <div className="absolute inset-0 z-50 bg-neuro-surface p-6 flex flex-col items-center justify-center animate-in fade-in slide-in-from-bottom-10">
+              {showEnergyWarning && energyContext && (
+                <div className="absolute inset-0 z-50 bg-neuro-surface p-6 flex flex-col items-center justify-center animate-in fade-in slide-in-from-bottom-10 text-center">
                     <div className="w-16 h-16 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mb-4 shadow-lg shadow-orange-500/20">
                         <TrendingDown size={32} />
                     </div>
-                    <h3 className="text-2xl font-serif font-bold text-white text-center mb-2">Queda de Energia Prevista</h3>
-                    <p className="text-neuro-muted text-center text-sm mb-8 px-4">
-                        Seu ciclo circadiano natural tende a baixar entre <strong>13h e 15h</strong>. 
-                        Tarefas cognitivas complexas podem custar 2x mais esforço mental agora.
+                    <h3 className="text-2xl font-serif font-bold text-white mb-2">Alerta de Cronotipo</h3>
+                    <p className="text-neuro-primary font-bold text-sm mb-2 uppercase tracking-widest">{energyContext.label}</p>
+                    <p className="text-neuro-muted text-sm mb-8 px-4 leading-relaxed">
+                        Detectamos que você está agendando uma tarefa durante seu vale biológico natural ({energyContext.lowEnergyStart}h - {energyContext.lowEnergyEnd}h).
+                        <br/><br/>
+                        {energyContext.message}
                     </p>
-
-                    {/* Chart Visualization */}
-                    <div className="w-full flex items-end justify-center gap-2 h-24 mb-8 px-8">
-                        <div className="w-8 h-full bg-white/5 rounded-t-lg relative group">
-                            <div className="absolute bottom-0 w-full h-[80%] bg-neuro-secondary/50 rounded-t-lg"></div>
-                            <span className="absolute -bottom-6 text-[10px] text-neuro-muted left-1">10h</span>
-                        </div>
-                        <div className="w-8 h-full bg-white/5 rounded-t-lg relative">
-                             <div className="absolute bottom-0 w-full h-[40%] bg-orange-500/80 rounded-t-lg animate-pulse shadow-[0_0_10px_rgba(249,115,22,0.5)]"></div>
-                             <span className="absolute -bottom-6 text-[10px] text-orange-500 font-bold left-1">14h</span>
-                        </div>
-                        <div className="w-8 h-full bg-white/5 rounded-t-lg relative">
-                             <div className="absolute bottom-0 w-full h-[90%] bg-neuro-primary rounded-t-lg shadow-glow"></div>
-                             <span className="absolute -bottom-6 text-[10px] text-neuro-secondary font-bold left-1">16h</span>
-                        </div>
-                    </div>
 
                     <div className="w-full space-y-3">
                         <button 
@@ -249,7 +274,7 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
                             className="w-full bg-neuro-primary hover:bg-neuro-secondary text-white py-4 rounded-xl font-medium shadow-glow flex items-center justify-center gap-2 transition-all active:scale-95 border border-neuro-secondary/20"
                         >
                             <Zap size={18} fill="currentColor" />
-                            Otimizar para 16:00
+                            Otimizar para {energyContext.peakTime}
                         </button>
                         <button 
                             onClick={handleConfirmOriginal}
@@ -319,11 +344,10 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, onAddTask, onToggleTask, onD
                     />
                     <p className="text-[10px] text-neuro-muted mt-1 ml-1 flex items-center gap-1 opacity-70">
                         <Sparkles size={10} />
-                        Dica: Evite tarefas pesadas entre 13h e 15h.
+                        Dica: O NeuroFocus analisará seu cronotipo ({CHRONOTYPE_DATA[user.chronotype || 'bear'].label}).
                     </p>
                  </div>
 
-                 {/* Conditional: Days (Habit/Daily) OR Date (Todo) */}
                  {type === TaskType.TODO ? (
                     <div>
                         <label className="block text-xs font-bold text-neuro-muted uppercase tracking-wider mb-2">Data (Opcional)</label>

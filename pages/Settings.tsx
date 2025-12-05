@@ -1,17 +1,45 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { User, Mail, Save, Award, Zap, Quote, Loader2, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { User, Mail, Save, Award, Zap, Quote, Loader2, Lock, CheckCircle2, AlertCircle, Sun, Moon, Sunrise, Waves } from 'lucide-react';
 
 interface SettingsProps {
   user: UserProfile;
-  onUpdateProfile: (name: string, bio: string) => Promise<void>;
+  onUpdateProfile: (name: string, bio: string, chronotype?: string) => Promise<void>;
 }
+
+const CHRONOTYPES = [
+  { 
+    id: 'lion', 
+    label: 'Leão (Matutino)', 
+    icon: Sunrise, 
+    desc: 'Acorda cedo cheio de energia. Pico de foco: 08h - 12h. Cansaço bate cedo à noite.' 
+  },
+  { 
+    id: 'bear', 
+    label: 'Urso (Solar)', 
+    icon: Sun, 
+    desc: 'Ritmo solar tradicional. Pico de foco: 10h - 14h. Necessita de 8h de sono sólidas.' 
+  },
+  { 
+    id: 'wolf', 
+    label: 'Lobo (Noturno)', 
+    icon: Moon, 
+    desc: 'Dificuldade de manhã. Pico criativo e energético começa tarde: 17h - 00h.' 
+  },
+  { 
+    id: 'dolphin', 
+    label: 'Golfinho (Errático)', 
+    icon: Waves, 
+    desc: 'Sono leve e fragmentado. Melhor foco em janelas curtas: 10h - 12h.' 
+  }
+];
 
 const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
   // Profile State
   const [username, setUsername] = useState(user.username || '');
   const [bio, setBio] = useState(user.bio || '');
+  const [chronotype, setChronotype] = useState<string>(user.chronotype || 'bear'); // Default to Bear if null
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
@@ -26,7 +54,7 @@ const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
     setProfileSaving(true);
     setProfileMessage(null);
     try {
-      await onUpdateProfile(username, bio);
+      await onUpdateProfile(username, bio, chronotype);
       setProfileMessage('Perfil atualizado com sucesso!');
       setTimeout(() => setProfileMessage(null), 3000);
     } catch (error) {
@@ -108,15 +136,49 @@ const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
                   <textarea 
                       value={bio}
                       onChange={(e) => setBio(e.target.value)}
-                      rows={3}
+                      rows={2}
                       className="w-full pl-10 pr-4 py-3 bg-neuro-base border border-neuro-highlight rounded-xl focus:outline-none focus:ring-2 focus:ring-neuro-primary/50 focus:border-neuro-primary text-white resize-none placeholder:text-gray-700"
-                      placeholder="Uma frase que te inspira ou seu objetivo principal..."
+                      placeholder="Uma frase que te inspira..."
                   />
                </div>
             </div>
 
+            {/* CHRONOTYPE SELECTION */}
+            <div className="space-y-3 pt-2">
+               <label className="text-xs font-bold text-neuro-muted uppercase tracking-wider ml-1 flex items-center gap-2">
+                  <Zap size={14} className="text-neuro-secondary" />
+                  Seu Cronotipo (Bio-Ritmo)
+               </label>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {CHRONOTYPES.map((type) => (
+                    <div 
+                      key={type.id}
+                      onClick={() => setChronotype(type.id)}
+                      className={`cursor-pointer p-4 rounded-xl border transition-all duration-300 relative overflow-hidden group ${
+                        chronotype === type.id 
+                          ? 'bg-neuro-highlight border-neuro-primary shadow-glow-sm' 
+                          : 'bg-neuro-base border-white/5 hover:border-white/20'
+                      }`}
+                    >
+                       <div className="flex items-center gap-3 mb-2">
+                          <type.icon size={20} className={chronotype === type.id ? 'text-neuro-secondary' : 'text-neuro-muted'} />
+                          <span className={`font-bold text-sm ${chronotype === type.id ? 'text-white' : 'text-gray-400'}`}>
+                             {type.label}
+                          </span>
+                       </div>
+                       <p className="text-xs text-neuro-muted leading-tight opacity-80">
+                          {type.desc}
+                       </p>
+                       {chronotype === type.id && (
+                          <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-neuro-primary shadow-glow"></div>
+                       )}
+                    </div>
+                  ))}
+               </div>
+            </div>
+
             <div className="space-y-2 opacity-60">
-               <label className="text-xs font-bold text-neuro-muted uppercase tracking-wider ml-1">Email (Não editável)</label>
+               <label className="text-xs font-bold text-neuro-muted uppercase tracking-wider ml-1">Email</label>
                <div className="flex items-center gap-3 px-4 py-3 bg-neuro-base/50 border border-white/5 rounded-xl text-neuro-muted">
                   <Mail size={16} />
                   <span>{user.email}</span>
@@ -130,7 +192,7 @@ const Settings: React.FC<SettingsProps> = ({ user, onUpdateProfile }) => {
                 className="bg-neuro-primary hover:bg-neuro-secondary text-white px-6 py-3 rounded-xl shadow-glow flex items-center gap-2 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed border border-neuro-secondary/20"
               >
                  {profileSaving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                 Salvar Alterações
+                 Salvar Perfil
               </button>
               {profileMessage && (
                 <span className={`text-sm font-medium animate-in fade-in ${profileMessage.includes('Erro') ? 'text-red-400' : 'text-neuro-secondary'}`}>
