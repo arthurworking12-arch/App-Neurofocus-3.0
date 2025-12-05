@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -7,6 +8,7 @@ import Insights from './pages/Insights';
 import NeuroChat from './pages/NeuroChat';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import NeuroSetup from './components/NeuroSetup'; // Import New Component
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { UserProfile, Task, TaskType, TaskPriority } from './types';
 import { Session } from '@supabase/supabase-js';
@@ -32,6 +34,10 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   
+  // State for Onboarding
+  const [showSetup, setShowSetup] = useState(false);
+
+  // States for Auth/Recovery
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryConfirm, setRecoveryConfirm] = useState('');
@@ -90,23 +96,33 @@ const App: React.FC = () => {
         .single();
 
       if (error || !data) {
+        // Create Default Profile
+        const emailPrefix = session.user.email?.split('@')[0] || 'Membro';
         const newProfile: UserProfile = {
           id: session.user.id,
           email: session.user.email!,
-          username: session.user.email?.split('@')[0],
+          username: emailPrefix,
           level: 1,
           current_xp: 0,
-          xp_to_next_level: 100, // Nível 1 começa com 100
+          xp_to_next_level: 100,
           streak_days: 0,
           bio: '',
           chronotype: 'bear'
         };
         
         setUserProfile(newProfile);
+        setShowSetup(true); // New User -> Trigger Setup
         
         await (supabase.from('profiles') as any).upsert(newProfile);
       } else {
         setUserProfile(data);
+        
+        // Check if user is "unconfigured" (Name matches email prefix)
+        // This forces existing users who haven't set up to see the screen too
+        const emailPrefix = data.email.split('@')[0];
+        if (data.username === emailPrefix) {
+           setShowSetup(true);
+        }
       }
     } catch (e) {
       console.error("Erro no fluxo de perfil:", e);
@@ -145,7 +161,6 @@ const App: React.FC = () => {
           setTasks(processedTasks);
 
           if (tasksToResetIds.length > 0) {
-             // Reseta status e pontos base no banco pois é um NOVO dia
              await (supabase.from('tasks') as any)
                .update({ is_completed: false, points: 20 }) 
                .in('id', tasksToResetIds);
@@ -154,6 +169,21 @@ const App: React.FC = () => {
      } catch (e) {
        console.error("Erro ao buscar tarefas:", e);
      }
+  };
+
+  const handleSetupComplete = async (username: string, chronotype: string) => {
+    if (!userProfile) return;
+
+    const updatedProfile = { ...userProfile, username, chronotype: chronotype as any };
+    setUserProfile(updatedProfile);
+    setShowSetup(false);
+
+    try {
+      await (supabase.from('profiles') as any).upsert(updatedProfile);
+      setToast({ message: "Sistema Neural Calibrado", xp: 0, type: 'critical' });
+    } catch (e) {
+      console.error("Erro ao salvar setup:", e);
+    }
   };
 
   const handleAddTask = async (taskData: Partial<Task>) => {
@@ -183,91 +213,66 @@ const App: React.FC = () => {
     const today = new Date().toISOString().split('T')[0];
     const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
     
-    // --- LÓGICA ANTI-FARM (Sorte Persistente) ---
-    // Se a tarefa já foi completada hoje, usamos os pontos que já estão salvos nela.
-    // Isso impede que o usuário desmarque e marque para tentar "rodar o dado" de novo.
-    
     let finalPoints = task.points; 
     let xpType: 'normal' | 'critical' | 'jackpot' = 'normal';
 
     if (updatedStatus) {
-        // == MARCANDO CHECK ==
-        
         if (taskLastDate === today) {
-            // JÁ JOGOU HOJE: Não rola o dado. Usa o valor salvo.
-            // Apenas define o tipo para mostrar o Toast correto
             const base = task.type === TaskType.HABIT ? 10 : 20;
             if (finalPoints >= base + 50) xpType = 'jackpot';
             else if (finalPoints >= base * 2) xpType = 'critical';
             else xpType = 'normal';
         } else {
-            // PRIMEIRA VEZ HOJE: Rola o dado!
             const basePoints = task.type === TaskType.HABIT ? 10 : 20;
             const rng = Math.random() * 100;
             
             if (rng >= 90) { 
-                // 10% Chance: JACKPOT (+50)
                 finalPoints = basePoints + 50;
                 xpType = 'jackpot';
             } else if (rng >= 70) { 
-                // 20% Chance: CRITICAL (2x)
                 finalPoints = basePoints * 2;
                 xpType = 'critical';
             } else {
-                // 70% Chance: Normal
                 finalPoints = basePoints;
                 xpType = 'normal';
             }
         }
-    } else {
-        // == DESMARCANDO ==
-        // Subtraímos os pontos atuais (que podem ser 70, 40 ou 20).
-        // NÃO resetamos 'finalPoints' para o base aqui. Mantemos o valor alto salvo
-        // para que, se ele marcar de novo hoje, ganhe o mesmo valor (e não role de novo).
     }
 
-    // Atualiza estado local
     setTasks(tasks.map(t => t.id === task.id ? { 
         ...t, 
         is_completed: updatedStatus,
-        points: finalPoints, // Salva o resultado do dado
-        last_completed_date: updatedStatus ? today : t.last_completed_date // Mantém a data mesmo se desmarcar (trava de segurança)
+        points: finalPoints,
+        last_completed_date: updatedStatus ? today : t.last_completed_date 
     } : t));
 
-    // Atualiza DB da Task
     if (updatedStatus) {
        await (supabase.from('tasks') as any).update({ 
           is_completed: true,
           last_completed_date: today,
-          points: finalPoints // Salva a sorte no banco
+          points: finalPoints 
        }).eq('id', task.id);
     } else {
        await (supabase.from('tasks') as any).update({ 
           is_completed: false,
-          // IMPORTANTE: NÃO limpamos last_completed_date nem resetamos points.
-          // Isso garante a persistência da sorte do dia.
        }).eq('id', task.id);
     }
 
-    // --- LÓGICA DE NÍVEIS PROGRESSIVOS ---
     if (userProfile) {
       let newLevel = userProfile.level;
       let newCurrentXp = userProfile.current_xp;
       
-      // Fórmula: Meta = Nível Atual * 100
       let xpThreshold = newLevel * 100;
 
       if (updatedStatus) {
         newCurrentXp += finalPoints;
         
-        // Loop de Level Up (caso ganhe XP suficiente para subir vários níveis)
         while (newCurrentXp >= xpThreshold) {
           newCurrentXp = newCurrentXp - xpThreshold;
           newLevel += 1;
-          xpThreshold = newLevel * 100; // Atualiza a meta para o novo nível
+          xpThreshold = newLevel * 100; 
         }
 
-        // Feedback Visual (Toast)
         let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
         if (xpType === 'critical') message = "Sincronia Neural! Foco em dobro!";
         if (xpType === 'jackpot') message = "FLUXO PERFEITO! Recompensa máxima!";
@@ -275,10 +280,7 @@ const App: React.FC = () => {
         setToast({ message, xp: finalPoints, type: xpType });
 
       } else {
-        // Desmarcou tarefa
         newCurrentXp -= finalPoints;
-        
-        // Loop de Level Down (Anti-exploit reverso)
         while (newCurrentXp < 0) {
            if (newLevel > 1) {
               newLevel -= 1;
@@ -289,7 +291,7 @@ const App: React.FC = () => {
               break;
            }
         }
-        xpThreshold = newLevel * 100; // Recalcula meta
+        xpThreshold = newLevel * 100; 
       }
 
       const updatedProfile = { 
@@ -363,6 +365,7 @@ const App: React.FC = () => {
     );
   }
 
+  // RECOVERY MODE SCREEN
   if (isRecoveryMode) {
     return (
       <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
@@ -409,6 +412,7 @@ const App: React.FC = () => {
     );
   }
 
+  // LOGIN SCREEN
   if (!session) {
     if (!isSupabaseConfigured) {
       return (
@@ -425,6 +429,7 @@ const App: React.FC = () => {
     return <Login />;
   }
 
+  // LOADING PROFILE
   if (session && !userProfile) {
      return (
       <div className="min-h-screen flex items-center justify-center bg-neuro-base">
@@ -437,6 +442,7 @@ const App: React.FC = () => {
     );
   }
 
+  // MAIN APP + ONBOARDING CHECK
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -476,40 +482,47 @@ const App: React.FC = () => {
   };
 
   return (
-    <Layout 
-      activeTab={activeTab} 
-      onTabChange={setActiveTab}
-      userProfile={userProfile}
-    >
-      {renderContent()}
-      
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-right fade-in duration-500 ease-out">
-          <div className={`
-            px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border hover:scale-105 transition-transform cursor-default
-            ${toast.type === 'jackpot' 
-              ? 'bg-yellow-900/90 border-yellow-500 text-yellow-100 shadow-[0_0_30px_rgba(234,179,8,0.4)]' 
-              : toast.type === 'critical' 
-                ? 'bg-blue-900/90 border-blue-400 text-blue-100 shadow-[0_0_30px_rgba(96,165,250,0.4)]' 
-                : 'bg-neuro-surface text-white border-neuro-primary/30'}
-          `}>
-            <div className={`
-              p-2.5 rounded-xl shadow-lg
-              ${toast.type === 'jackpot' ? 'bg-yellow-500 text-black animate-pulse' : toast.type === 'critical' ? 'bg-blue-500 text-white' : 'bg-neuro-primary text-white'}
-            `}>
-              {toast.type === 'jackpot' ? <Crown size={24} fill="currentColor" /> : toast.type === 'critical' ? <Zap size={24} fill="currentColor" /> : <Trophy size={20} fill="currentColor" />}
-            </div>
-            <div>
-              <p className={`font-serif font-bold text-lg leading-none mb-1 ${toast.type === 'jackpot' ? 'text-yellow-400' : toast.type === 'critical' ? 'text-blue-300' : 'text-white'}`}>
-                +{toast.xp} XP
-                {toast.type !== 'normal' && <span className="text-[10px] ml-2 uppercase tracking-wider opacity-80">{toast.type}</span>}
-              </p>
-              <p className={`text-xs font-medium ${toast.type === 'jackpot' ? 'text-yellow-200' : 'text-gray-300'}`}>{toast.message}</p>
-            </div>
-          </div>
-        </div>
-      )}
-    </Layout>
+    <>
+       {/* SHOW SETUP IF NEW USER */}
+       {showSetup && userProfile && (
+          <NeuroSetup user={userProfile} onComplete={handleSetupComplete} />
+       )}
+
+       <Layout 
+         activeTab={activeTab} 
+         onTabChange={setActiveTab}
+         userProfile={userProfile}
+       >
+         {renderContent()}
+         
+         {toast && (
+           <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-right fade-in duration-500 ease-out">
+             <div className={`
+               px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border hover:scale-105 transition-transform cursor-default
+               ${toast.type === 'jackpot' 
+                 ? 'bg-yellow-900/90 border-yellow-500 text-yellow-100 shadow-[0_0_30px_rgba(234,179,8,0.4)]' 
+                 : toast.type === 'critical' 
+                   ? 'bg-blue-900/90 border-blue-400 text-blue-100 shadow-[0_0_30px_rgba(96,165,250,0.4)]' 
+                   : 'bg-neuro-surface text-white border-neuro-primary/30'}
+             `}>
+               <div className={`
+                 p-2.5 rounded-xl shadow-lg
+                 ${toast.type === 'jackpot' ? 'bg-yellow-500 text-black animate-pulse' : toast.type === 'critical' ? 'bg-blue-500 text-white' : 'bg-neuro-primary text-white'}
+               `}>
+                 {toast.type === 'jackpot' ? <Crown size={24} fill="currentColor" /> : toast.type === 'critical' ? <Zap size={24} fill="currentColor" /> : <Trophy size={20} fill="currentColor" />}
+               </div>
+               <div>
+                 <p className={`font-serif font-bold text-lg leading-none mb-1 ${toast.type === 'jackpot' ? 'text-yellow-400' : toast.type === 'critical' ? 'text-blue-300' : 'text-white'}`}>
+                   +{toast.xp} XP
+                   {toast.type !== 'normal' && <span className="text-[10px] ml-2 uppercase tracking-wider opacity-80">{toast.type}</span>}
+                 </p>
+                 <p className={`text-xs font-medium ${toast.type === 'jackpot' ? 'text-yellow-200' : 'text-gray-300'}`}>{toast.message}</p>
+               </div>
+             </div>
+           </div>
+         )}
+       </Layout>
+    </>
   );
 };
 
