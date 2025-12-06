@@ -14,6 +14,7 @@ import { UserProfile, Task, TaskType, TaskPriority, Subtask } from './types';
 import { Session } from '@supabase/supabase-js';
 import { Trophy, Zap, Crown } from 'lucide-react';
 import { decomposeTask } from './services/geminiService';
+import { playSound } from './services/soundService'; // IMPORTADO
 
 const MOTIVATIONAL_QUOTES = [
   "Dopamina liberada! O cérebro agradece.",
@@ -212,6 +213,7 @@ const App: React.FC = () => {
       if (error) throw error;
       
       setToast({ message: "Sistema Neural Calibrado", xp: 0, type: 'critical' });
+      playSound('levelUp', 0.4); // Sound for setup complete
     } catch (e: any) {
       // Log full error message
       console.error("Erro fatal ao salvar setup:", e.message || e);
@@ -239,6 +241,7 @@ const App: React.FC = () => {
 
     setTasks([newTask, ...tasks]);
     await (supabase.from('tasks') as any).insert(newTask);
+    playSound('check', 0.2); // Subtle sound on add
   };
 
   const handleDecomposeTask = async (task: Task) => {
@@ -261,6 +264,7 @@ const App: React.FC = () => {
          .eq('id', task.id);
          
        setToast({ message: "Neuro-Decomposição Concluída!", xp: 0, type: 'critical' });
+       playSound('critical', 0.4); // Sound on AI magic
     } catch (e) {
        console.error("Erro ao decompor tarefa", e);
     }
@@ -274,7 +278,10 @@ const App: React.FC = () => {
      );
 
      // Optimistic Update
+     const newStatus = !task.subtasks.find(s => s.id === subtaskId)?.is_completed;
      setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: updatedSubtasks } : t));
+     
+     if (newStatus) playSound('check', 0.3); // Sound on subtask check
 
      // Save to DB
      await (supabase.from('tasks') as any)
@@ -321,6 +328,10 @@ const App: React.FC = () => {
                 xpType = 'normal';
             }
         }
+        
+        // --- PLAY SOUNDS ---
+        const soundType = xpType === 'normal' ? 'check' : xpType;
+        playSound(soundType, xpType === 'normal' ? 0.4 : 0.6);
     }
 
     setTasks(tasks.map(t => t.id === task.id ? { 
@@ -356,6 +367,9 @@ const App: React.FC = () => {
           newCurrentXp = newCurrentXp - xpThreshold;
           newLevel += 1;
           xpThreshold = newLevel * 100; 
+          
+          // PLAY LEVEL UP SOUND
+          setTimeout(() => playSound('levelUp', 0.7), 500); // Slight delay for dramatic effect
         }
 
         let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
@@ -411,6 +425,8 @@ const App: React.FC = () => {
     await (supabase.from('profiles') as any)
       .update({ username, bio, chronotype })
       .eq('id', userProfile.id);
+      
+    playSound('check', 0.4);
   };
   
   const handlePasswordRecoveryReset = async (e: React.FormEvent) => {

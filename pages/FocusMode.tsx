@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Coffee, Brain } from 'lucide-react';
+import { playSound } from '../services/soundService'; // IMPORTADO
 
 const MODES = {
   focus: { label: 'Foco Profundo', minutes: 25, color: 'text-neuro-primary', ring: 'stroke-neuro-primary', glow: 'drop-shadow-[0_0_10px_rgba(122,43,239,0.8)]' },
@@ -22,7 +24,10 @@ const FocusMode: React.FC = () => {
       }, 1000);
     } else if (timeLeft === 0) {
       setIsActive(false);
-      // Play sound or notification here
+      // PLAY SOUND
+      playSound('timerFinish', 0.6);
+      
+      // Notification
       if ('Notification' in window && Notification.permission === 'granted') {
           try {
             new Notification("NeuroFocus", { body: "Tempo esgotado!" });
@@ -42,17 +47,22 @@ const FocusMode: React.FC = () => {
       }
   }, []);
 
-  const toggleTimer = () => setIsActive(!isActive);
+  const toggleTimer = () => {
+      setIsActive(!isActive);
+      if (!isActive) playSound('click', 0.2); // Som ao iniciar
+  };
   
   const resetTimer = () => {
     setIsActive(false);
     setTimeLeft(MODES[mode].minutes * 60);
+    playSound('click', 0.2);
   };
 
   const changeMode = (newMode: TimerMode) => {
     setMode(newMode);
     setIsActive(false);
     setTimeLeft(MODES[newMode].minutes * 60);
+    playSound('click', 0.2);
   };
 
   const formatTime = (seconds: number) => {
