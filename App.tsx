@@ -607,15 +607,38 @@ const App: React.FC = () => {
     }
 
     try {
+      // --- LOGICA DE FORÇA BRUTA ---
+      // Pegamos o token diretamente da URL (Hash), independente do que o cliente do Supabase acha
+      const hash = window.location.hash.substring(1); // remove o #
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      // Se acharmos os tokens na URL, forçamos a sessão
+      if (accessToken && refreshToken) {
+          const { error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+          });
+          if (sessionError) console.warn("Erro ao forçar sessão:", sessionError);
+      }
+      
+      // Agora tentamos atualizar a senha (a sessão deve estar ativa)
       const { error } = await supabase.auth.updateUser({ password: recoveryPassword });
+      
       if (error) throw error;
-      setRecoveryMessage('Senha redefinida com sucesso! Redirecionando...');
+      
+      setRecoveryMessage('Senha redefinida com sucesso! Entrando...');
+      
+      // Limpeza e Redirecionamento
       setTimeout(() => {
         setIsRecoveryMode(false);
         window.location.hash = ''; // Limpa a URL
         window.location.reload(); // Recarrega para garantir estado limpo
       }, 2000);
+
     } catch (err: any) {
+      console.error(err);
       setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
     } finally {
       setRecoveryLoading(false);
