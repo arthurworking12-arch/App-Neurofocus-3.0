@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { Task, UserProfile, TaskType, UserActivity } from '../types';
-import { CheckCircle2, Flame, ArrowRight, Zap, Target, Play } from 'lucide-react';
+import { CheckCircle2, Flame, ArrowRight, Zap, Target, Play, BrainCircuit, Plus } from 'lucide-react';
 import ActivityHeatmap from '../components/ActivityHeatmap';
 
 interface DashboardProps {
@@ -11,11 +11,13 @@ interface DashboardProps {
   onNavigate: (tab: string) => void;
   activityData?: UserActivity[];
   onStartFocus?: (task: Task) => void; // Prop for deep focus
+  onAddTask: (task: Partial<Task>) => Promise<void>; // Prop for Brain Dump
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavigate, activityData, onStartFocus }) => {
+const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavigate, activityData, onStartFocus, onAddTask }) => {
   // Estado local para a data e hora em tempo real
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [brainDumpInput, setBrainDumpInput] = useState('');
 
   useEffect(() => {
     const updateTime = () => setCurrentDate(new Date());
@@ -32,6 +34,17 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavi
         window.removeEventListener('focus', handleFocus);
     };
   }, []);
+
+  const handleBrainDumpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!brainDumpInput.trim()) return;
+
+    await onAddTask({
+        title: brainDumpInput,
+        type: TaskType.TODO
+    });
+    setBrainDumpInput('');
+  };
 
   const dailyTasks = useMemo(() => 
     tasks.filter(t => t.type === TaskType.DAILY || t.type === TaskType.HABIT).slice(0, 5), 
@@ -88,6 +101,32 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavi
             </div>
           </div>
         </div>
+      </div>
+
+      {/* BRAIN DUMP - QUICK ENTRY */}
+      <div className="relative z-20">
+         <form onSubmit={handleBrainDumpSubmit} className="relative group">
+            <div className="absolute inset-0 bg-neuro-primary/10 rounded-2xl blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+            <div className="relative bg-neuro-surface/50 backdrop-blur-md border border-white/10 rounded-2xl flex items-center p-2 focus-within:border-neuro-primary/50 focus-within:ring-2 focus-within:ring-neuro-primary/20 transition-all shadow-lg">
+                <div className="pl-4 pr-3 text-neuro-secondary animate-pulse-slow">
+                    <BrainCircuit size={24} />
+                </div>
+                <input 
+                    type="text" 
+                    value={brainDumpInput}
+                    onChange={(e) => setBrainDumpInput(e.target.value)}
+                    placeholder="O que está na sua mente agora?"
+                    className="w-full bg-transparent border-none focus:ring-0 text-white placeholder:text-gray-500 py-3 text-lg"
+                />
+                <button 
+                    type="submit"
+                    disabled={!brainDumpInput.trim()}
+                    className="bg-neuro-primary hover:bg-neuro-secondary text-white p-3 rounded-xl disabled:opacity-0 disabled:scale-90 transition-all duration-300 shadow-glow"
+                >
+                    <Plus size={20} />
+                </button>
+            </div>
+         </form>
       </div>
 
       {/* Progress Card - Custom Purple Gradient */}

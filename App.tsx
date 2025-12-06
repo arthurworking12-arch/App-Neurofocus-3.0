@@ -688,7 +688,8 @@ const App: React.FC = () => {
           }} 
           onNavigate={setActiveTab}
           activityData={activityData}
-          onStartFocus={handleStartFocusSession} 
+          onStartFocus={handleStartFocusSession}
+          onAddTask={handleAddTask} 
         />;
       case 'routines':
         return <Routines 
@@ -721,6 +722,7 @@ const App: React.FC = () => {
           onNavigate={setActiveTab}
           activityData={activityData}
           onStartFocus={handleStartFocusSession}
+          onAddTask={handleAddTask}
         />;
     }
   };
