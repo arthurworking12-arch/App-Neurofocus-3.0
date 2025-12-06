@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -47,7 +46,15 @@ const App: React.FC = () => {
   
   const [showSetup, setShowSetup] = useState(false);
 
-  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  // Inicialização inteligente: Verifica a URL IMEDIATAMENTE para evitar piscar a tela de login
+  const [isRecoveryMode, setIsRecoveryMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      return hash.includes('type=recovery') || hash.includes('type=invite');
+    }
+    return false;
+  });
+
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryConfirm, setRecoveryConfirm] = useState('');
   const [recoveryLoading, setRecoveryLoading] = useState(false);
