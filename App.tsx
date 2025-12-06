@@ -12,7 +12,7 @@ import NeuroSetup from './components/NeuroSetup';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { UserProfile, Task, TaskType, TaskPriority, Subtask, UserActivity } from './types';
 import { Session } from '@supabase/supabase-js';
-import { Trophy, Zap, Crown, Loader2 } from 'lucide-react'; // Added Loader2 import
+import { Trophy, Zap, Crown } from 'lucide-react';
 import { decomposeTask } from './services/geminiService';
 import { playSound } from './services/soundService';
 
@@ -47,7 +47,8 @@ const App: React.FC = () => {
   
   const [showSetup, setShowSetup] = useState(false);
 
-  // Inicialização inteligente: Verifica a URL IMEDIATAMENTE para evitar piscar a tela de login
+  // DETECÇÃO DE MODO DE RECUPERAÇÃO/CONVITE (CRÍTICO PARA VENDAS)
+  // Verifica a URL imediatamente na inicialização. Se for invite ou recovery, força a tela de senha.
   const [isRecoveryMode, setIsRecoveryMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
@@ -82,11 +83,17 @@ const App: React.FC = () => {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       
-      // Verificação reforçada: Se a URL tiver recovery/invite, força o modo de recuperação
-      // mesmo que o evento seja SIGNED_IN (que acontece em convites)
-      const hash = window.location.hash;
-      if (event === 'PASSWORD_RECOVERY' || hash.includes('type=recovery') || hash.includes('type=invite')) {
+      // Monitora eventos de autenticação
+      if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
+      }
+      
+      // Se o usuário acabou de entrar (SIGNED_IN), verificamos se veio de um link de convite
+      if (event === 'SIGNED_IN') {
+        const hash = window.location.hash;
+        if (hash.includes('type=invite') || hash.includes('type=recovery')) {
+           setIsRecoveryMode(true);
+        }
       }
     });
 
@@ -101,6 +108,7 @@ const App: React.FC = () => {
   }, [toast]);
 
   useEffect(() => {
+    // Só busca dados se NÃO estivermos no modo de recuperação/convite
     if (session?.user && !isRecoveryMode) {
       fetchUserProfile();
       fetchTasks();
@@ -247,7 +255,7 @@ const App: React.FC = () => {
     try {
       const { data } = await supabase
         .from('user_activity')
-        .select('*') // Changed to select all fields to match UserActivity type
+        .select('*') 
         .eq('user_id', session.user.id)
         .gte('date', new Date(new Date().setDate(new Date().getDate() - 365)).toISOString());
 
@@ -407,7 +415,6 @@ const App: React.FC = () => {
       if (entry.count === 0 && isCompleted) {
          currentStreak += 1;
       } else if (entry.count === 1 && !isCompleted) {
-         // Se removeu a única tarefa do dia, decremente (opcional, depende da regra)
          currentStreak = Math.max(0, currentStreak - 1);
       }
     } else if (isCompleted) {
@@ -605,7 +612,8 @@ const App: React.FC = () => {
       setRecoveryMessage('Senha redefinida com sucesso! Redirecionando...');
       setTimeout(() => {
         setIsRecoveryMode(false);
-        window.location.hash = ''; 
+        window.location.hash = ''; // Limpa a URL
+        window.location.reload(); // Recarrega para garantir estado limpo
       }, 2000);
     } catch (err: any) {
       setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
@@ -626,21 +634,8 @@ const App: React.FC = () => {
     );
   }
 
+  // TELA DE DEFINIÇÃO DE SENHA (CONVITE OU RECUPERAÇÃO)
   if (isRecoveryMode) {
-    // IMPORTANT: Wait for session to be active before showing the password form
-    // The link contains a token that Supabase needs to process to create a session
-    if (!session) {
-       return (
-        <div className="min-h-screen bg-neuro-base flex flex-col items-center justify-center p-4">
-             <div className="flex items-center gap-3 text-white mb-4">
-                <Loader2 className="animate-spin text-neuro-primary" size={32} />
-                <span className="text-xl font-medium">Validando link de segurança...</span>
-             </div>
-             <p className="text-neuro-muted text-sm">Aguarde enquanto autenticamos seu acesso.</p>
-        </div>
-       );
-    }
-
     return (
       <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
         <div className="max-w-md w-full bg-neuro-surface/50 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/5 p-8 relative z-10 animate-in fade-in zoom-in duration-300">
@@ -673,7 +668,7 @@ const App: React.FC = () => {
                disabled={recoveryLoading}
                className="w-full py-3 bg-neuro-primary text-white rounded-xl font-bold shadow-glow hover:bg-neuro-secondary transition-all"
              >
-               {recoveryLoading ? 'Salvando...' : 'Redefinir Senha'}
+               {recoveryLoading ? 'Salvando...' : 'Definir Senha e Entrar'}
              </button>
              {recoveryMessage && (
                <p className={`text-center text-sm font-medium ${recoveryMessage.includes('sucesso') ? 'text-green-400' : 'text-red-400'}`}>
