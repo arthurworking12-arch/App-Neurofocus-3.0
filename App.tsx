@@ -14,7 +14,7 @@ import { UserProfile, Task, TaskType, TaskPriority, Subtask, UserActivity } from
 import { Session } from '@supabase/supabase-js';
 import { Trophy, Zap, Crown } from 'lucide-react';
 import { decomposeTask } from './services/geminiService';
-import { playSound } from './services/soundService'; // IMPORTADO
+import { playSound } from './services/soundService';
 
 const MOTIVATIONAL_QUOTES = [
   "Dopamina liberada! O cérebro agradece.",
@@ -28,6 +28,14 @@ const MOTIVATIONAL_QUOTES = [
   "Cada check é um voto na pessoa que você quer ser."
 ];
 
+// Helper para obter a data local no formato YYYY-MM-DD
+const getLocalISOString = () => {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60000;
+  const localDate = new Date(now.getTime() - offset);
+  return localDate.toISOString().split('T')[0];
+};
+
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -35,22 +43,18 @@ const App: React.FC = () => {
   
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [activityData, setActivityData] = useState<UserActivity[]>([]); // New State for Heatmap
+  const [activityData, setActivityData] = useState<UserActivity[]>([]); 
   
-  // State for Onboarding
   const [showSetup, setShowSetup] = useState(false);
 
-  // States for Auth/Recovery
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryConfirm, setRecoveryConfirm] = useState('');
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string|null>(null);
 
-  // DEEP FOCUS STATE
   const [focusedTask, setFocusedTask] = useState<Task | null>(null);
 
-  // Toast
   const [toast, setToast] = useState<{ message: string; xp: number; type: 'normal' | 'critical' | 'jackpot' } | null>(null);
 
   useEffect(() => {
@@ -88,7 +92,7 @@ const App: React.FC = () => {
     if (session?.user && !isRecoveryMode) {
       fetchUserProfile();
       fetchTasks();
-      fetchActivityHistory(); // Fetch heatmap data
+      fetchActivityHistory();
     }
   }, [session, isRecoveryMode]);
 
@@ -108,7 +112,6 @@ const App: React.FC = () => {
       }
 
       if (!data) {
-        // Create Default Profile only if it truly doesn't exist
         const emailPrefix = session.user.email?.split('@')[0] || 'Membro';
         const newProfile: UserProfile = {
           id: session.user.id,
@@ -119,28 +122,65 @@ const App: React.FC = () => {
           xp_to_next_level: 100,
           streak_days: 0,
           bio: '',
-          chronotype: null // Explicitly null to trigger onboarding
+          chronotype: null 
         };
         
-        // Optimistic update
         setUserProfile(newProfile);
         setShowSetup(true); 
         
-        const { error: insertError } = await (supabase.from('profiles') as any).upsert(newProfile);
-        if (insertError) console.error("Erro ao criar perfil inicial:", insertError.message);
+        await (supabase.from('profiles') as any).upsert(newProfile);
 
       } else {
         setUserProfile(data);
-        
-        // Critical Check: If chronotype is null, trigger setup
         if (!data.chronotype) {
            setShowSetup(true);
         } else {
            setShowSetup(false);
+           // Recalcular Streak ao carregar o perfil existente
+           recalculateStreak(data.streak_days);
         }
       }
     } catch (e: any) {
       console.error("Exceção no fluxo de perfil:", e.message || e);
+    }
+  };
+
+  const recalculateStreak = async (currentStreak: number) => {
+    if (!session?.user) return;
+
+    try {
+      // Busca os últimos 2 dias de atividade
+      const today = getLocalISOString();
+      const yesterdayDate = new Date();
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterday = yesterdayDate.toISOString().split('T')[0];
+
+      const { data } = await supabase
+        .from('user_activity')
+        .select('date, count')
+        .eq('user_id', session.user.id)
+        .in('date', [yesterday, today]);
+
+      const hasActivityToday = data?.some(a => a.date === today && a.count > 0);
+      const hasActivityYesterday = data?.some(a => a.date === yesterday && a.count > 0);
+
+      let newStreak = currentStreak;
+
+      if (!hasActivityYesterday && !hasActivityToday) {
+        // Se não fez nada ontem nem hoje, o streak zera
+        newStreak = 0;
+      } else if (hasActivityYesterday && !hasActivityToday) {
+        // Se fez ontem, o streak mantém (esperando atividade de hoje)
+        // Não faz nada
+      }
+      
+      // Se o cálculo diferir do que está salvo, atualiza
+      if (newStreak !== currentStreak) {
+        setUserProfile(prev => prev ? { ...prev, streak_days: newStreak } : null);
+        await (supabase.from('profiles') as any).update({ streak_days: newStreak }).eq('id', session.user.id);
+      }
+    } catch (e) {
+      console.error("Erro ao recalcular streak:", e);
     }
   };
 
@@ -154,26 +194,18 @@ const App: React.FC = () => {
          .eq('user_id', session.user.id);
        
        if (data) {
-          // FIX: Use LOCAL DATE instead of UTC to determine "today"
-          const now = new Date();
-          const localToday = now.getFullYear() + '-' + 
-                           String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                           String(now.getDate()).padStart(2, '0');
-
+          const localToday = getLocalISOString();
           const tasksToResetIds: string[] = [];
 
           const processedTasks = data.map((task: Task) => {
              const isRecurring = task.type === TaskType.DAILY || task.type === TaskType.HABIT;
              
              if (isRecurring && task.is_completed) {
-                // Parse the stored timestamp and compare date parts
-                // Assuming last_completed_date is stored as 'YYYY-MM-DD' or ISO
                 const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
                 
-                // Reset daily tasks only if the date is NOT today
+                // Reseta se a data da última conclusão não for HOJE (data local)
                 if (taskLastDate !== localToday) {
                     tasksToResetIds.push(task.id);
-                    // Reset points to base value for the new day roll
                     const basePoints = task.type === TaskType.HABIT ? 10 : 20;
                     return { ...task, is_completed: false, points: basePoints };
                 }
@@ -184,7 +216,6 @@ const App: React.FC = () => {
           setTasks(processedTasks);
 
           if (tasksToResetIds.length > 0) {
-             // Batch update to reset daily tasks
              await (supabase.from('tasks') as any)
                .update({ is_completed: false, points: 20 }) 
                .in('id', tasksToResetIds);
@@ -198,8 +229,7 @@ const App: React.FC = () => {
   const fetchActivityHistory = async () => {
     if (!session?.user) return;
     try {
-      // Fetch user_activity table
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('user_activity')
         .select('date, count, total_xp')
         .eq('user_id', session.user.id)
@@ -216,19 +246,16 @@ const App: React.FC = () => {
   const handleSetupComplete = async (username: string, chronotype: string) => {
     if (!userProfile) return;
 
-    // Create the updated profile object locally
     const updatedProfile = { 
         ...userProfile, 
         username, 
         chronotype: chronotype as any 
     };
 
-    // Optimistic Update
     setUserProfile(updatedProfile);
     setShowSetup(false);
 
     try {
-      // Use UPDATE specifically for the changed fields to avoid conflicts
       const { error } = await (supabase.from('profiles') as any)
         .update({ username, chronotype })
         .eq('id', userProfile.id);
@@ -236,9 +263,8 @@ const App: React.FC = () => {
       if (error) throw error;
       
       setToast({ message: "Sistema Neural Calibrado", xp: 0, type: 'critical' });
-      playSound('levelUp', 0.4); // Sound for setup complete
+      playSound('levelUp', 0.4); 
     } catch (e: any) {
-      // Log full error message
       console.error("Erro fatal ao salvar setup:", e.message || e);
     }
   };
@@ -259,18 +285,17 @@ const App: React.FC = () => {
       repeat_days: taskData.repeat_days,
       due_date: taskData.due_date,
       energy_level: taskData.energy_level as any,
-      subtasks: [] // Initialize empty
+      subtasks: [] 
     };
 
     setTasks([newTask, ...tasks]);
     await (supabase.from('tasks') as any).insert(newTask);
-    playSound('check', 0.2); // Subtle sound on add
+    playSound('check', 0.2); 
   };
 
   const handleEditTask = async (updatedTask: Task) => {
     if (!session?.user) return;
 
-    // Optimistic Update
     setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t));
 
     try {
@@ -281,7 +306,6 @@ const App: React.FC = () => {
           time: updatedTask.time,
           repeat_days: updatedTask.repeat_days,
           due_date: updatedTask.due_date,
-          // We preserve points, completion status, subtasks etc.
         })
         .eq('id', updatedTask.id);
 
@@ -289,7 +313,6 @@ const App: React.FC = () => {
       playSound('click', 0.2);
     } catch (e: any) {
       console.error("Erro ao editar tarefa:", e);
-      // Revert optimism if needed (not implementing revert for simplicity here)
     }
   };
 
@@ -304,16 +327,14 @@ const App: React.FC = () => {
           is_completed: false
        }));
 
-       // Optimistic Update
        setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: newSubtasks } : t));
 
-       // Save to DB
        await (supabase.from('tasks') as any)
          .update({ subtasks: newSubtasks })
          .eq('id', task.id);
          
        setToast({ message: "Neuro-Decomposição Concluída!", xp: 0, type: 'critical' });
-       playSound('critical', 0.4); // Sound on AI magic
+       playSound('critical', 0.4); 
     } catch (e) {
        console.error("Erro ao decompor tarefa", e);
     }
@@ -326,19 +347,16 @@ const App: React.FC = () => {
         sub.id === subtaskId ? { ...sub, is_completed: !sub.is_completed } : sub
      );
 
-     // Optimistic Update
      const newStatus = !task.subtasks.find(s => s.id === subtaskId)?.is_completed;
      setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: updatedSubtasks } : t));
      
-     if (newStatus) playSound('check', 0.3); // Sound on subtask check
+     if (newStatus) playSound('check', 0.3); 
 
-     // Save to DB
      await (supabase.from('tasks') as any)
         .update({ subtasks: updatedSubtasks })
         .eq('id', task.id);
   };
 
-  // --- DEEP FOCUS LOGIC ---
   const handleStartFocusSession = (task: Task) => {
      setFocusedTask(task);
      setActiveTab('focus');
@@ -347,21 +365,20 @@ const App: React.FC = () => {
   const handleCompleteFocusSession = async () => {
     if (focusedTask) {
         await handleToggleTask(focusedTask);
-        setFocusedTask(null); // Clear focused state after completion
+        setFocusedTask(null); 
     }
   };
 
   const updateActivityLog = async (isCompleted: boolean, points: number) => {
     if (!session?.user) return;
     
-    const now = new Date();
-    const localToday = now.getFullYear() + '-' + 
-                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                       String(now.getDate()).padStart(2, '0');
+    const localToday = getLocalISOString();
 
     // Optimistic Update for UI Heatmap
     const existingEntryIndex = activityData.findIndex(a => a.date === localToday);
     const newActivityData = [...activityData];
+
+    let currentStreak = userProfile?.streak_days || 0;
 
     if (existingEntryIndex >= 0) {
       const entry = newActivityData[existingEntryIndex];
@@ -370,15 +387,26 @@ const App: React.FC = () => {
         count: isCompleted ? entry.count + 1 : Math.max(0, entry.count - 1),
         total_xp: isCompleted ? entry.total_xp + points : Math.max(0, entry.total_xp - points)
       };
+      // Se for a primeira tarefa do dia, incrementa streak
+      if (entry.count === 0 && isCompleted) {
+         currentStreak += 1;
+      } else if (entry.count === 1 && !isCompleted) {
+         // Se removeu a única tarefa do dia, decremente (opcional, depende da regra)
+         currentStreak = Math.max(0, currentStreak - 1);
+      }
     } else if (isCompleted) {
       newActivityData.push({ date: localToday, count: 1, total_xp: points });
+      currentStreak += 1;
     }
     setActivityData(newActivityData);
 
+    // Atualiza streak no perfil local e banco
+    if (currentStreak !== userProfile?.streak_days) {
+        setUserProfile(prev => prev ? { ...prev, streak_days: currentStreak } : null);
+        await (supabase.from('profiles') as any).update({ streak_days: currentStreak }).eq('id', session.user.id);
+    }
+
     try {
-      // DB call to sync user_activity using upsert logic
-      // Since supabase-js upsert is easy, we assume we might need to fetch first or let trigger handle it?
-      // For simplicity in this env, we will try to fetch today's row, if exists update, else insert.
       const { data: todayRow } = await supabase
         .from('user_activity')
         .select('*')
@@ -399,7 +427,6 @@ const App: React.FC = () => {
             total_xp: points
          });
       }
-
     } catch (e) {
       console.error("Erro ao atualizar log de atividade", e);
     }
@@ -408,12 +435,7 @@ const App: React.FC = () => {
   const handleToggleTask = async (task: Task) => {
     const updatedStatus = !task.is_completed;
     
-    // FIX: Use Local Date for today
-    const now = new Date();
-    const localToday = now.getFullYear() + '-' + 
-                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                       String(now.getDate()).padStart(2, '0');
-
+    const localToday = getLocalISOString();
     const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
     
     let finalPoints = task.points; 
@@ -422,14 +444,13 @@ const App: React.FC = () => {
     if (updatedStatus) {
         // ANTI-FARM LOGIC:
         if (taskLastDate === localToday) {
-            finalPoints = task.points; // Keep existing points
+            finalPoints = task.points; 
             
             const base = task.type === TaskType.HABIT ? 10 : 20;
             if (finalPoints >= base + 50) xpType = 'jackpot';
             else if (finalPoints >= base * 2) xpType = 'critical';
             else xpType = 'normal';
         } else {
-            // NEW COMPLETION FOR TODAY: Roll the dice!
             const basePoints = task.type === TaskType.HABIT ? 10 : 20;
             const rng = Math.random() * 100;
             
@@ -445,7 +466,6 @@ const App: React.FC = () => {
             }
         }
         
-        // --- PLAY SOUNDS ---
         const soundType = xpType === 'normal' ? 'check' : xpType;
         playSound(soundType, xpType === 'normal' ? 0.4 : 0.6);
     }
@@ -457,7 +477,6 @@ const App: React.FC = () => {
         last_completed_date: updatedStatus ? localToday : t.last_completed_date 
     } : t));
 
-    // --- UPDATE ACTIVITY HEATMAP ---
     updateActivityLog(updatedStatus, finalPoints);
 
     if (updatedStatus) {
@@ -472,7 +491,6 @@ const App: React.FC = () => {
        }).eq('id', task.id);
     }
 
-    // XP & Level Logic
     if (userProfile) {
       let newLevel = userProfile.level;
       let newCurrentXp = userProfile.current_xp;
@@ -487,8 +505,7 @@ const App: React.FC = () => {
           newLevel += 1;
           xpThreshold = newLevel * 100; 
           
-          // PLAY LEVEL UP SOUND
-          setTimeout(() => playSound('levelUp', 0.7), 500); // Slight delay for dramatic effect
+          setTimeout(() => playSound('levelUp', 0.7), 500); 
         }
 
         let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
@@ -540,7 +557,6 @@ const App: React.FC = () => {
     const updatedProfile = { ...userProfile, username, bio, chronotype: chronotype as any };
     setUserProfile(updatedProfile);
 
-    // Use Update to be safe
     await (supabase.from('profiles') as any)
       .update({ username, bio, chronotype })
       .eq('id', userProfile.id);
@@ -565,7 +581,7 @@ const App: React.FC = () => {
       setRecoveryMessage('Senha redefinida com sucesso! Redirecionando...');
       setTimeout(() => {
         setIsRecoveryMode(false);
-        window.location.hash = ''; // Clear any hash fragment
+        window.location.hash = ''; 
       }, 2000);
     } catch (err: any) {
       setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
@@ -586,7 +602,6 @@ const App: React.FC = () => {
     );
   }
 
-  // RECOVERY MODE SCREEN
   if (isRecoveryMode) {
     return (
       <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
@@ -633,7 +648,6 @@ const App: React.FC = () => {
     );
   }
 
-  // LOGIN SCREEN
   if (!session) {
     if (!isSupabaseConfigured) {
       return (
@@ -650,7 +664,6 @@ const App: React.FC = () => {
     return <Login />;
   }
 
-  // LOADING PROFILE
   if (session && !userProfile) {
      return (
       <div className="min-h-screen flex items-center justify-center bg-neuro-base">
@@ -675,7 +688,7 @@ const App: React.FC = () => {
           }} 
           onNavigate={setActiveTab}
           activityData={activityData}
-          onStartFocus={handleStartFocusSession} // Pass Deep Focus Handler
+          onStartFocus={handleStartFocusSession} 
         />;
       case 'routines':
         return <Routines 
@@ -687,7 +700,7 @@ const App: React.FC = () => {
           onDeleteTask={handleDeleteTask}
           onDecomposeTask={handleDecomposeTask}
           onToggleSubtask={handleToggleSubtask}
-          onStartFocus={handleStartFocusSession} // Pass Deep Focus Handler
+          onStartFocus={handleStartFocusSession} 
         />;
       case 'focus':
         return <FocusMode 
@@ -714,7 +727,6 @@ const App: React.FC = () => {
 
   return (
     <>
-       {/* SHOW SETUP ONLY IF CHRONOTYPE IS NULL OR UNDEFINED */}
        {showSetup && userProfile && (
           <NeuroSetup user={userProfile} onComplete={handleSetupComplete} />
        )}

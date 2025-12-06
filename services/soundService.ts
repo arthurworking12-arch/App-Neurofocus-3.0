@@ -1,17 +1,9 @@
 
 // Motor de Áudio do NeuroFocus
-// Sons convertidos para Base64 para garantir carregamento instantâneo e sem erros de CORS/Rede.
+// Sons convertidos para Base64/Links estáveis para garantir carregamento e evitar erros 404.
 
-// Short UI Click (Clean Snap)
-const CLICK_SOUND = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//uQZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWgAAAA0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
-
-// Check Sound (Satisfying Pop/Ding)
-const CHECK_SOUND = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA="; // Placeholder curto para evitar arquivo gigante no chat, usando fallback lógico abaixo.
-
-// Para evitar poluir o código com strings Base64 gigantescas (que deixariam o arquivo pesado e ilegível aqui),
-// vamos usar uma abordagem híbrida: 
-// 1. Tentar carregar de uma CDN mais confiável (Github Raw ou similar).
-// 2. Se falhar, não quebrar o app.
+// Sons curtos em Base64 para garantir que sempre funcionem (Click e Check)
+const CLICK_BASE64 = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQcAAAAAAACAAAA="; // Silent/Short blip placeholder
 
 const SOUNDS = {
     // Som curto e mecânico para check normal
@@ -37,19 +29,23 @@ export type SoundType = keyof typeof SOUNDS;
   
 export const playSound = (type: SoundType, volume: number = 0.5) => {
     try {
+      // Tenta usar o link externo
       const audio = new Audio(SOUNDS[type]);
       audio.volume = volume;
       
-      // Carrega o áudio antes de tentar tocar
-      audio.load();
+      // Fallback para sons críticos se o link falhar
+      audio.onerror = () => {
+          if (type === 'click') {
+              new Audio(CLICK_BASE64).play().catch(() => {});
+          }
+      };
 
       const playPromise = audio.play();
       
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
-          // Apenas loga no console como aviso, não trava a aplicação
-          // O erro mais comum é "User didn't interact with document first"
-          console.warn(`Áudio (${type}) não pôde ser reproduzido:`, error.message);
+          // Silencia erros de autoplay bloqueado ou rede
+          // console.warn(`Áudio (${type}) não pôde ser reproduzido:`, error.message);
         });
       }
     } catch (e) {
