@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Routines from './pages/Routines';
@@ -48,7 +48,6 @@ const App: React.FC = () => {
   const [showSetup, setShowSetup] = useState(false);
 
   // DETECÇÃO DE MODO DE RECUPERAÇÃO/CONVITE (CRÍTICO PARA VENDAS)
-  // Verifica a URL imediatamente na inicialização. Se for invite ou recovery, força a tela de senha.
   const [isRecoveryMode, setIsRecoveryMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
@@ -56,6 +55,22 @@ const App: React.FC = () => {
     }
     return false;
   });
+
+  // --- CAPTURA SEGURA DE TOKENS ---
+  // Usamos useRef para guardar os tokens assim que o app carrega,
+  // antes que a URL seja limpa pelo navegador ou redirecionamentos.
+  const recoveryTokensRef = useRef<{ access_token: string, refresh_token: string } | null>(null);
+  
+  if (!recoveryTokensRef.current && typeof window !== 'undefined') {
+     const hash = window.location.hash.substring(1);
+     const params = new URLSearchParams(hash);
+     const at = params.get('access_token');
+     const rt = params.get('refresh_token');
+     
+     if (at && rt) {
+        recoveryTokensRef.current = { access_token: at, refresh_token: rt };
+     }
+  }
 
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryConfirm, setRecoveryConfirm] = useState('');
@@ -607,20 +622,26 @@ const App: React.FC = () => {
     }
 
     try {
-      // --- LOGICA DE FORÇA BRUTA ---
-      // Pegamos o token diretamente da URL (Hash), independente do que o cliente do Supabase acha
-      const hash = window.location.hash.substring(1); // remove o #
-      const params = new URLSearchParams(hash);
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-
-      // Se acharmos os tokens na URL, forçamos a sessão
-      if (accessToken && refreshToken) {
+      // --- LOGICA DE FORÇA BRUTA COM TOKENS PERSISTIDOS ---
+      // Usamos os tokens que foram capturados assim que o app carregou (no useRef).
+      // Isso garante que, mesmo que a URL tenha mudado, temos os tokens.
+      const tokens = recoveryTokensRef.current;
+      
+      if (tokens && tokens.access_token && tokens.refresh_token) {
           const { error: sessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
+              access_token: tokens.access_token,
+              refresh_token: tokens.refresh_token,
           });
           if (sessionError) console.warn("Erro ao forçar sessão:", sessionError);
+      } else {
+          // Fallback: Tenta ler da URL caso o ref tenha falhado (raro)
+          const hash = window.location.hash.substring(1);
+          const params = new URLSearchParams(hash);
+          const at = params.get('access_token');
+          const rt = params.get('refresh_token');
+          if (at && rt) {
+             await supabase.auth.setSession({ access_token: at, refresh_token: rt });
+          }
       }
       
       // Agora tentamos atualizar a senha (a sessão deve estar ativa)
