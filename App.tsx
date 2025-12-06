@@ -65,8 +65,9 @@ const App: React.FC = () => {
      const at = params.get('access_token');
      const rt = params.get('refresh_token');
      
-     if (at && rt) {
-        recoveryTokensRef.current = { access_token: at, refresh_token: rt };
+     // CORREÇÃO CRÍTICA: Aceita se tiver APENAS o access_token, pois o refresh pode vir vazio
+     if (at) {
+        recoveryTokensRef.current = { access_token: at, refresh_token: rt || at }; // Usa o AT como fallback se RT for vazio
      }
   }
 
@@ -518,10 +519,10 @@ const App: React.FC = () => {
       if (!currentSession) {
           const tokens = recoveryTokensRef.current;
           
-          if (tokens?.access_token && tokens?.refresh_token) {
-              const { error: sessionError, data: sessionData } = await supabase.auth.setSession({
+          if (tokens?.access_token) {
+              const { error: sessionError } = await supabase.auth.setSession({
                   access_token: tokens.access_token,
-                  refresh_token: tokens.refresh_token,
+                  refresh_token: tokens.refresh_token || tokens.access_token, // CORREÇÃO: Usa access_token como fallback se refresh for vazio
               });
               
               if (sessionError) throw new Error("Link expirado ou inválido.");
@@ -534,8 +535,10 @@ const App: React.FC = () => {
              const params = new URLSearchParams(hash);
              const at = params.get('access_token');
              const rt = params.get('refresh_token');
-             if (at && rt) {
-                 const { error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt });
+             
+             // Relaxamento da verificação: Se tiver AT, prossegue
+             if (at) {
+                 const { error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt || at });
                  if (error) throw new Error("Não foi possível validar o link.");
              } else {
                  throw new Error("Token de segurança não encontrado.");
