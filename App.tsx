@@ -28,7 +28,6 @@ const MOTIVATIONAL_QUOTES = [
   "Cada check é um voto na pessoa que você quer ser."
 ];
 
-// Helper para obter a data local no formato YYYY-MM-DD
 const getLocalISOString = () => {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
@@ -47,7 +46,7 @@ const App: React.FC = () => {
   
   const [showSetup, setShowSetup] = useState(false);
 
-  // DETECÇÃO DE MODO DE RECUPERAÇÃO/CONVITE (CRÍTICO PARA VENDAS)
+  // --- DETECÇÃO SEGURA DE CONVITE/RECUPERAÇÃO ---
   const [isRecoveryMode, setIsRecoveryMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
@@ -56,9 +55,8 @@ const App: React.FC = () => {
     return false;
   });
 
-  // --- CAPTURA SEGURA DE TOKENS ---
-  // Usamos useRef para guardar os tokens assim que o app carrega,
-  // antes que a URL seja limpa pelo navegador ou redirecionamentos.
+  // --- CAPTURA DE TOKENS PARA FORÇA BRUTA ---
+  // Captura os tokens imediatamente ao montar o componente para garantir que não sejam perdidos.
   const recoveryTokensRef = useRef<{ access_token: string, refresh_token: string } | null>(null);
   
   if (!recoveryTokensRef.current && typeof window !== 'undefined') {
@@ -78,7 +76,6 @@ const App: React.FC = () => {
   const [recoveryMessage, setRecoveryMessage] = useState<string|null>(null);
 
   const [focusedTask, setFocusedTask] = useState<Task | null>(null);
-
   const [toast, setToast] = useState<{ message: string; xp: number; type: 'normal' | 'critical' | 'jackpot' } | null>(null);
 
   useEffect(() => {
@@ -93,17 +90,14 @@ const App: React.FC = () => {
         setLoading(false);
       });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       
-      // Monitora eventos de autenticação
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
       }
       
-      // Se o usuário acabou de entrar (SIGNED_IN), verificamos se veio de um link de convite
+      // Detecta login automático via link
       if (event === 'SIGNED_IN') {
         const hash = window.location.hash;
         if (hash.includes('type=invite') || hash.includes('type=recovery')) {
@@ -123,7 +117,6 @@ const App: React.FC = () => {
   }, [toast]);
 
   useEffect(() => {
-    // Só busca dados se NÃO estivermos no modo de recuperação/convite
     if (session?.user && !isRecoveryMode) {
       fetchUserProfile();
       fetchTasks();
@@ -161,19 +154,15 @@ const App: React.FC = () => {
           bio: '',
           chronotype: null 
         };
-        
         setUserProfile(newProfile);
         setShowSetup(true); 
-        
         await (supabase.from('profiles') as any).upsert(newProfile);
-
       } else {
         setUserProfile(data);
         if (!data.chronotype) {
            setShowSetup(true);
         } else {
            setShowSetup(false);
-           // Recalcular Streak ao carregar o perfil existente
            recalculateStreak(data.streak_days);
         }
       }
@@ -184,9 +173,7 @@ const App: React.FC = () => {
 
   const recalculateStreak = async (currentStreak: number) => {
     if (!session?.user) return;
-
     try {
-      // Busca os últimos 2 dias de atividade
       const today = getLocalISOString();
       const yesterdayDate = new Date();
       yesterdayDate.setDate(yesterdayDate.getDate() - 1);
@@ -199,21 +186,15 @@ const App: React.FC = () => {
         .in('date', [yesterday, today]);
 
       const data = activityResult as { date: string, count: number }[] | null;
-
       const hasActivityToday = data?.some(a => a.date === today && a.count > 0);
       const hasActivityYesterday = data?.some(a => a.date === yesterday && a.count > 0);
 
       let newStreak = currentStreak;
 
       if (!hasActivityYesterday && !hasActivityToday) {
-        // Se não fez nada ontem nem hoje, o streak zera
         newStreak = 0;
-      } else if (hasActivityYesterday && !hasActivityToday) {
-        // Se fez ontem, o streak mantém (esperando atividade de hoje)
-        // Não faz nada
       }
       
-      // Se o cálculo diferir do que está salvo, atualiza
       if (newStreak !== currentStreak) {
         setUserProfile(prev => prev ? { ...prev, streak_days: newStreak } : null);
         await (supabase.from('profiles') as any).update({ streak_days: newStreak }).eq('id', session.user.id);
@@ -225,7 +206,6 @@ const App: React.FC = () => {
 
   const fetchTasks = async () => {
      if (!session?.user) return;
-     
      try {
        const { data } = await supabase
          .from('tasks')
@@ -238,11 +218,8 @@ const App: React.FC = () => {
 
           const processedTasks = data.map((task: Task) => {
              const isRecurring = task.type === TaskType.DAILY || task.type === TaskType.HABIT;
-             
              if (isRecurring && task.is_completed) {
                 const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
-                
-                // Reseta se a data da última conclusão não for HOJE (data local)
                 if (taskLastDate !== localToday) {
                     tasksToResetIds.push(task.id);
                     const basePoints = task.type === TaskType.HABIT ? 10 : 20;
@@ -251,9 +228,7 @@ const App: React.FC = () => {
              }
              return task;
           });
-
           setTasks(processedTasks);
-
           if (tasksToResetIds.length > 0) {
              await (supabase.from('tasks') as any)
                .update({ is_completed: false, points: 20 }) 
@@ -273,10 +248,7 @@ const App: React.FC = () => {
         .select('*') 
         .eq('user_id', session.user.id)
         .gte('date', new Date(new Date().setDate(new Date().getDate() - 365)).toISOString());
-
-      if (data) {
-        setActivityData(data);
-      }
+      if (data) setActivityData(data);
     } catch (e) {
       console.error("Erro ao buscar histórico de atividade", e);
     }
@@ -284,13 +256,7 @@ const App: React.FC = () => {
 
   const handleSetupComplete = async (username: string, chronotype: string) => {
     if (!userProfile) return;
-
-    const updatedProfile = { 
-        ...userProfile, 
-        username, 
-        chronotype: chronotype as any 
-    };
-
+    const updatedProfile = { ...userProfile, username, chronotype: chronotype as any };
     setUserProfile(updatedProfile);
     setShowSetup(false);
 
@@ -298,19 +264,16 @@ const App: React.FC = () => {
       const { error } = await (supabase.from('profiles') as any)
         .update({ username, chronotype })
         .eq('id', userProfile.id);
-      
       if (error) throw error;
-      
       setToast({ message: "Sistema Neural Calibrado", xp: 0, type: 'critical' });
       playSound('levelUp', 0.4); 
     } catch (e: any) {
-      console.error("Erro fatal ao salvar setup:", e.message || e);
+      console.error("Erro ao salvar setup:", e.message || e);
     }
   };
 
   const handleAddTask = async (taskData: Partial<Task>) => {
     if (!session?.user || !taskData.title) return;
-
     const newTask: Task = {
       id: crypto.randomUUID(),
       user_id: session.user.id,
@@ -326,7 +289,6 @@ const App: React.FC = () => {
       energy_level: taskData.energy_level as any,
       subtasks: [] 
     };
-
     setTasks([newTask, ...tasks]);
     await (supabase.from('tasks') as any).insert(newTask);
     playSound('check', 0.2); 
@@ -334,11 +296,9 @@ const App: React.FC = () => {
 
   const handleEditTask = async (updatedTask: Task) => {
     if (!session?.user) return;
-
     setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t));
-
     try {
-      const { error } = await (supabase.from('tasks') as any)
+      await (supabase.from('tasks') as any)
         .update({
           title: updatedTask.title,
           type: updatedTask.type,
@@ -347,53 +307,35 @@ const App: React.FC = () => {
           due_date: updatedTask.due_date,
         })
         .eq('id', updatedTask.id);
-
-      if (error) throw error;
       playSound('click', 0.2);
-    } catch (e: any) {
-      console.error("Erro ao editar tarefa:", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const handleDecomposeTask = async (task: Task) => {
     try {
        const steps = await decomposeTask(task.title);
        if (steps.length === 0) return;
-
        const newSubtasks: Subtask[] = steps.map(step => ({
           id: crypto.randomUUID(),
           title: step,
           is_completed: false
        }));
-
        setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: newSubtasks } : t));
-
-       await (supabase.from('tasks') as any)
-         .update({ subtasks: newSubtasks })
-         .eq('id', task.id);
-         
+       await (supabase.from('tasks') as any).update({ subtasks: newSubtasks }).eq('id', task.id);
        setToast({ message: "Neuro-Decomposição Concluída!", xp: 0, type: 'critical' });
        playSound('critical', 0.4); 
-    } catch (e) {
-       console.error("Erro ao decompor tarefa", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const handleToggleSubtask = async (task: Task, subtaskId: string) => {
      if (!task.subtasks) return;
-
      const updatedSubtasks = task.subtasks.map(sub => 
         sub.id === subtaskId ? { ...sub, is_completed: !sub.is_completed } : sub
      );
-
      const newStatus = !task.subtasks.find(s => s.id === subtaskId)?.is_completed;
      setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: updatedSubtasks } : t));
-     
      if (newStatus) playSound('check', 0.3); 
-
-     await (supabase.from('tasks') as any)
-        .update({ subtasks: updatedSubtasks })
-        .eq('id', task.id);
+     await (supabase.from('tasks') as any).update({ subtasks: updatedSubtasks }).eq('id', task.id);
   };
 
   const handleStartFocusSession = (task: Task) => {
@@ -410,13 +352,9 @@ const App: React.FC = () => {
 
   const updateActivityLog = async (isCompleted: boolean, points: number) => {
     if (!session?.user) return;
-    
     const localToday = getLocalISOString();
-
-    // Optimistic Update for UI Heatmap
     const existingEntryIndex = activityData.findIndex(a => a.date === localToday);
     const newActivityData = [...activityData];
-
     let currentStreak = userProfile?.streak_days || 0;
 
     if (existingEntryIndex >= 0) {
@@ -426,7 +364,6 @@ const App: React.FC = () => {
         count: isCompleted ? entry.count + 1 : Math.max(0, entry.count - 1),
         total_xp: isCompleted ? entry.total_xp + points : Math.max(0, entry.total_xp - points)
       };
-      // Se for a primeira tarefa do dia, incrementa streak
       if (entry.count === 0 && isCompleted) {
          currentStreak += 1;
       } else if (entry.count === 1 && !isCompleted) {
@@ -444,7 +381,6 @@ const App: React.FC = () => {
     }
     setActivityData(newActivityData);
 
-    // Atualiza streak no perfil local e banco
     if (currentStreak !== userProfile?.streak_days) {
         setUserProfile(prev => prev ? { ...prev, streak_days: currentStreak } : null);
         await (supabase.from('profiles') as any).update({ streak_days: currentStreak }).eq('id', session.user.id);
@@ -473,14 +409,11 @@ const App: React.FC = () => {
             total_xp: points
          });
       }
-    } catch (e) {
-      console.error("Erro ao atualizar log de atividade", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const handleToggleTask = async (task: Task) => {
     const updatedStatus = !task.is_completed;
-    
     const localToday = getLocalISOString();
     const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
     
@@ -488,10 +421,8 @@ const App: React.FC = () => {
     let xpType: 'normal' | 'critical' | 'jackpot' = 'normal';
 
     if (updatedStatus) {
-        // ANTI-FARM LOGIC:
         if (taskLastDate === localToday) {
             finalPoints = task.points; 
-            
             const base = task.type === TaskType.HABIT ? 10 : 20;
             if (finalPoints >= base + 50) xpType = 'jackpot';
             else if (finalPoints >= base * 2) xpType = 'critical';
@@ -499,19 +430,10 @@ const App: React.FC = () => {
         } else {
             const basePoints = task.type === TaskType.HABIT ? 10 : 20;
             const rng = Math.random() * 100;
-            
-            if (rng >= 90) { 
-                finalPoints = basePoints + 50;
-                xpType = 'jackpot';
-            } else if (rng >= 70) { 
-                finalPoints = basePoints * 2;
-                xpType = 'critical';
-            } else {
-                finalPoints = basePoints;
-                xpType = 'normal';
-            }
+            if (rng >= 90) { finalPoints = basePoints + 50; xpType = 'jackpot'; } 
+            else if (rng >= 70) { finalPoints = basePoints * 2; xpType = 'critical'; } 
+            else { finalPoints = basePoints; xpType = 'normal'; }
         }
-        
         const soundType = xpType === 'normal' ? 'check' : xpType;
         playSound(soundType, xpType === 'normal' ? 0.4 : 0.6);
     }
@@ -532,56 +454,27 @@ const App: React.FC = () => {
           points: finalPoints 
        }).eq('id', task.id);
     } else {
-       await (supabase.from('tasks') as any).update({ 
-          is_completed: false,
-       }).eq('id', task.id);
+       await (supabase.from('tasks') as any).update({ is_completed: false }).eq('id', task.id);
     }
 
-    if (userProfile) {
+    if (userProfile && updatedStatus) {
       let newLevel = userProfile.level;
-      let newCurrentXp = userProfile.current_xp;
-      
+      let newCurrentXp = userProfile.current_xp + finalPoints;
       let xpThreshold = newLevel * 100;
 
-      if (updatedStatus) {
-        newCurrentXp += finalPoints;
-        
-        while (newCurrentXp >= xpThreshold) {
+      while (newCurrentXp >= xpThreshold) {
           newCurrentXp = newCurrentXp - xpThreshold;
           newLevel += 1;
           xpThreshold = newLevel * 100; 
-          
           setTimeout(() => playSound('levelUp', 0.7), 500); 
-        }
-
-        let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
-        if (xpType === 'critical') message = "Sincronia Neural! Foco em dobro!";
-        if (xpType === 'jackpot') message = "FLUXO PERFEITO! Recompensa máxima!";
-        
-        setToast({ message, xp: finalPoints, type: xpType });
-
-      } else {
-        newCurrentXp -= finalPoints;
-        while (newCurrentXp < 0) {
-           if (newLevel > 1) {
-              newLevel -= 1;
-              const prevThreshold = newLevel * 100;
-              newCurrentXp = prevThreshold + newCurrentXp;
-           } else {
-              newCurrentXp = 0;
-              break;
-           }
-        }
-        xpThreshold = newLevel * 100; 
       }
-
-      const updatedProfile = { 
-        ...userProfile, 
-        current_xp: newCurrentXp, 
-        level: newLevel,
-        xp_to_next_level: xpThreshold
-      };
       
+      let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
+      if (xpType === 'critical') message = "Sincronia Neural! Foco em dobro!";
+      if (xpType === 'jackpot') message = "FLUXO PERFEITO! Recompensa máxima!";
+      setToast({ message, xp: finalPoints, type: xpType });
+
+      const updatedProfile = { ...userProfile, current_xp: newCurrentXp, level: newLevel, xp_to_next_level: xpThreshold };
       setUserProfile(updatedProfile);
       
       await (supabase.from('profiles') as any).update({
@@ -599,17 +492,13 @@ const App: React.FC = () => {
 
   const handleUpdateProfile = async (username: string, bio: string, chronotype?: string) => {
     if (!userProfile) return;
-
     const updatedProfile = { ...userProfile, username, bio, chronotype: chronotype as any };
     setUserProfile(updatedProfile);
-
-    await (supabase.from('profiles') as any)
-      .update({ username, bio, chronotype })
-      .eq('id', userProfile.id);
-      
+    await (supabase.from('profiles') as any).update({ username, bio, chronotype }).eq('id', userProfile.id);
     playSound('check', 0.4);
   };
   
+  // --- MANUSEIO DE REDEFINIÇÃO DE SENHA "A PROVA DE FALHAS" ---
   const handlePasswordRecoveryReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryLoading(true);
@@ -622,41 +511,50 @@ const App: React.FC = () => {
     }
 
     try {
-      // --- LOGICA DE FORÇA BRUTA COM TOKENS PERSISTIDOS ---
-      // Usamos os tokens que foram capturados assim que o app carregou (no useRef).
-      // Isso garante que, mesmo que a URL tenha mudado, temos os tokens.
-      const tokens = recoveryTokensRef.current;
+      // Passo 1: Verifica se já temos uma sessão
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
       
-      if (tokens && tokens.access_token && tokens.refresh_token) {
-          const { error: sessionError } = await supabase.auth.setSession({
-              access_token: tokens.access_token,
-              refresh_token: tokens.refresh_token,
-          });
-          if (sessionError) console.warn("Erro ao forçar sessão:", sessionError);
-      } else {
-          // Fallback: Tenta ler da URL caso o ref tenha falhado (raro)
-          const hash = window.location.hash.substring(1);
-          const params = new URLSearchParams(hash);
-          const at = params.get('access_token');
-          const rt = params.get('refresh_token');
-          if (at && rt) {
-             await supabase.auth.setSession({ access_token: at, refresh_token: rt });
+      // Passo 2: Se não tiver sessão, usamos os tokens capturados para FORÇAR uma
+      if (!currentSession) {
+          const tokens = recoveryTokensRef.current;
+          
+          if (tokens?.access_token && tokens?.refresh_token) {
+              const { error: sessionError, data: sessionData } = await supabase.auth.setSession({
+                  access_token: tokens.access_token,
+                  refresh_token: tokens.refresh_token,
+              });
+              
+              if (sessionError) throw new Error("Link expirado ou inválido.");
+              
+              // Pequena pausa para garantir propagação
+              await new Promise(resolve => setTimeout(resolve, 100));
+          } else {
+             // Tenta ler da URL como último recurso
+             const hash = window.location.hash.substring(1);
+             const params = new URLSearchParams(hash);
+             const at = params.get('access_token');
+             const rt = params.get('refresh_token');
+             if (at && rt) {
+                 const { error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt });
+                 if (error) throw new Error("Não foi possível validar o link.");
+             } else {
+                 throw new Error("Token de segurança não encontrado.");
+             }
           }
       }
-      
-      // Agora tentamos atualizar a senha (a sessão deve estar ativa)
+
+      // Passo 3: Com a sessão (esperançosamente) ativa, atualizamos a senha
       const { error } = await supabase.auth.updateUser({ password: recoveryPassword });
       
       if (error) throw error;
       
-      setRecoveryMessage('Senha redefinida com sucesso! Entrando...');
+      setRecoveryMessage('Senha definida com sucesso! Acessando...');
       
-      // Limpeza e Redirecionamento
       setTimeout(() => {
         setIsRecoveryMode(false);
         window.location.hash = ''; // Limpa a URL
-        window.location.reload(); // Recarrega para garantir estado limpo
-      }, 2000);
+        window.location.reload(); 
+      }, 1500);
 
     } catch (err: any) {
       console.error(err);
@@ -669,21 +567,19 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neuro-base">
-        <img 
-          src="https://i.postimg.cc/G3FxF89L/NFbasica.png" 
-          alt="Loading..." 
-          className="w-24 h-24 object-contain animate-pulse drop-shadow-[0_0_20px_rgba(122,43,239,0.5)]" 
-        />
+        <img src="https://i.postimg.cc/G3FxF89L/NFbasica.png" alt="Loading..." className="w-24 h-24 object-contain animate-pulse drop-shadow-[0_0_20px_rgba(122,43,239,0.5)]" />
       </div>
     );
   }
 
-  // TELA DE DEFINIÇÃO DE SENHA (CONVITE OU RECUPERAÇÃO)
+  // MODO DE RECUPERAÇÃO / DEFINIÇÃO DE SENHA
   if (isRecoveryMode) {
     return (
       <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
         <div className="max-w-md w-full bg-neuro-surface/50 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/5 p-8 relative z-10 animate-in fade-in zoom-in duration-300">
-           <h2 className="text-2xl font-bold text-white mb-6 text-center">Definir Nova Senha</h2>
+           <h2 className="text-2xl font-bold text-white mb-6 text-center">Definir Senha de Acesso</h2>
+           <p className="text-neuro-muted text-sm text-center mb-6">Crie uma senha segura para proteger seu sistema neural.</p>
+           
            <form onSubmit={handlePasswordRecoveryReset} className="space-y-4">
              <div>
                 <label className="text-xs font-bold text-neuro-muted uppercase">Nova Senha</label>
@@ -691,9 +587,10 @@ const App: React.FC = () => {
                   type="password" 
                   value={recoveryPassword}
                   onChange={e => setRecoveryPassword(e.target.value)}
-                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none"
+                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none focus:ring-1 focus:ring-neuro-primary"
                   required 
                   minLength={6}
+                  placeholder="Mínimo 6 caracteres"
                 />
              </div>
              <div>
@@ -702,22 +599,24 @@ const App: React.FC = () => {
                   type="password" 
                   value={recoveryConfirm}
                   onChange={e => setRecoveryConfirm(e.target.value)}
-                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none"
+                  className="w-full mt-1 p-3 rounded-xl bg-neuro-base border border-neuro-highlight text-white focus:border-neuro-primary outline-none focus:ring-1 focus:ring-neuro-primary"
                   required 
                   minLength={6}
+                  placeholder="Repita a senha"
                 />
              </div>
              <button 
                type="submit" 
                disabled={recoveryLoading}
-               className="w-full py-3 bg-neuro-primary text-white rounded-xl font-bold shadow-glow hover:bg-neuro-secondary transition-all"
+               className="w-full py-3 bg-neuro-primary text-white rounded-xl font-bold shadow-glow hover:bg-neuro-secondary transition-all mt-4 disabled:opacity-70"
              >
-               {recoveryLoading ? 'Salvando...' : 'Definir Senha e Entrar'}
+               {recoveryLoading ? 'Processando...' : 'Salvar e Entrar'}
              </button>
+             
              {recoveryMessage && (
-               <p className={`text-center text-sm font-medium ${recoveryMessage.includes('sucesso') ? 'text-green-400' : 'text-red-400'}`}>
+               <div className={`mt-4 p-3 rounded-xl text-center text-sm font-medium ${recoveryMessage.includes('sucesso') ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
                  {recoveryMessage}
-               </p>
+               </div>
              )}
            </form>
         </div>
@@ -728,12 +627,10 @@ const App: React.FC = () => {
   if (!session) {
     if (!isSupabaseConfigured) {
       return (
-         <div className="min-h-screen flex items-center justify-center p-8 text-center bg-stone-50 animate-in fade-in duration-700">
-            <div className="max-w-lg bg-white p-8 rounded-3xl shadow-xl border border-stone-100">
-              <h1 className="text-2xl font-serif font-bold text-stone-800 mb-4">Configuração Necessária</h1>
-              <p className="text-stone-600 mb-6 leading-relaxed">
-                Configure as chaves no services/supabaseClient.ts
-              </p>
+         <div className="min-h-screen flex items-center justify-center p-8 text-center bg-stone-50">
+            <div className="max-w-lg bg-white p-8 rounded-3xl shadow-xl">
+              <h1 className="text-2xl font-bold text-stone-800 mb-4">Configuração Necessária</h1>
+              <p>Configure as chaves no services/supabaseClient.ts</p>
             </div>
          </div>
       )
@@ -744,11 +641,7 @@ const App: React.FC = () => {
   if (session && !userProfile) {
      return (
       <div className="min-h-screen flex items-center justify-center bg-neuro-base">
-        <img 
-          src="https://i.postimg.cc/G3FxF89L/NFbasica.png" 
-          alt="Loading..." 
-          className="w-24 h-24 object-contain animate-pulse drop-shadow-[0_0_20px_rgba(122,43,239,0.5)]" 
-        />
+        <img src="https://i.postimg.cc/G3FxF89L/NFbasica.png" alt="Loading..." className="w-24 h-24 object-contain animate-pulse" />
       </div>
     );
   }
@@ -781,10 +674,7 @@ const App: React.FC = () => {
           onStartFocus={handleStartFocusSession} 
         />;
       case 'focus':
-        return <FocusMode 
-          focusedTask={focusedTask}
-          onCompleteTask={handleCompleteFocusSession}
-        />;
+        return <FocusMode focusedTask={focusedTask} onCompleteTask={handleCompleteFocusSession} />;
       case 'insights':
         return <Insights tasks={tasks} />;
       case 'chat':
@@ -792,53 +682,24 @@ const App: React.FC = () => {
       case 'settings':
         return <Settings user={userProfile!} onUpdateProfile={handleUpdateProfile} />;
       default:
-        return <Dashboard 
-          tasks={tasks} 
-          user={userProfile!} 
-          onToggleTask={() => {}} 
-          onNavigate={setActiveTab}
-          activityData={activityData}
-          onStartFocus={handleStartFocusSession}
-          onAddTask={handleAddTask}
-        />;
+        return <Dashboard tasks={tasks} user={userProfile!} onToggleTask={() => {}} onNavigate={setActiveTab} onAddTask={handleAddTask} />;
     }
   };
 
   return (
     <>
-       {showSetup && userProfile && (
-          <NeuroSetup user={userProfile} onComplete={handleSetupComplete} />
-       )}
-
-       <Layout 
-         activeTab={activeTab} 
-         onTabChange={setActiveTab}
-         userProfile={userProfile}
-       >
+       {showSetup && userProfile && <NeuroSetup user={userProfile} onComplete={handleSetupComplete} />}
+       <Layout activeTab={activeTab} onTabChange={setActiveTab} userProfile={userProfile}>
          {renderContent()}
-         
          {toast && (
-           <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-right fade-in duration-500 ease-out">
-             <div className={`
-               px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border hover:scale-105 transition-transform cursor-default
-               ${toast.type === 'jackpot' 
-                 ? 'bg-yellow-900/90 border-yellow-500 text-yellow-100 shadow-[0_0_30px_rgba(234,179,8,0.4)]' 
-                 : toast.type === 'critical' 
-                   ? 'bg-blue-900/90 border-blue-400 text-blue-100 shadow-[0_0_30px_rgba(96,165,250,0.4)]' 
-                   : 'bg-neuro-surface text-white border-neuro-primary/30'}
-             `}>
-               <div className={`
-                 p-2.5 rounded-xl shadow-lg
-                 ${toast.type === 'jackpot' ? 'bg-yellow-500 text-black animate-pulse' : toast.type === 'critical' ? 'bg-blue-500 text-white' : 'bg-neuro-primary text-white'}
-               `}>
-                 {toast.type === 'jackpot' ? <Crown size={24} fill="currentColor" /> : toast.type === 'critical' ? <Zap size={24} fill="currentColor" /> : <Trophy size={20} fill="currentColor" />}
+           <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-right fade-in duration-500">
+             <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border ${toast.type === 'jackpot' ? 'bg-yellow-900/90 border-yellow-500 text-yellow-100' : toast.type === 'critical' ? 'bg-blue-900/90 border-blue-400 text-blue-100' : 'bg-neuro-surface text-white border-neuro-primary/30'}`}>
+               <div className={`p-2.5 rounded-xl shadow-lg ${toast.type === 'jackpot' ? 'bg-yellow-500 text-black' : toast.type === 'critical' ? 'bg-blue-500 text-white' : 'bg-neuro-primary text-white'}`}>
+                 {toast.type === 'jackpot' ? <Crown size={24} /> : toast.type === 'critical' ? <Zap size={24} /> : <Trophy size={20} />}
                </div>
                <div>
-                 <p className={`font-serif font-bold text-lg leading-none mb-1 ${toast.type === 'jackpot' ? 'text-yellow-400' : toast.type === 'critical' ? 'text-blue-300' : 'text-white'}`}>
-                   +{toast.xp} XP
-                   {toast.type !== 'normal' && <span className="text-[10px] ml-2 uppercase tracking-wider opacity-80">{toast.type}</span>}
-                 </p>
-                 <p className={`text-xs font-medium ${toast.type === 'jackpot' ? 'text-yellow-200' : 'text-gray-300'}`}>{toast.message}</p>
+                 <p className="font-bold text-lg leading-none mb-1">+{toast.xp} XP</p>
+                 <p className="text-xs opacity-80">{toast.message}</p>
                </div>
              </div>
            </div>
