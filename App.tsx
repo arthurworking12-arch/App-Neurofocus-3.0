@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -80,7 +81,11 @@ const App: React.FC = () => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      if (event === 'PASSWORD_RECOVERY') {
+      
+      // Verificação reforçada: Se a URL tiver recovery/invite, força o modo de recuperação
+      // mesmo que o evento seja SIGNED_IN (que acontece em convites)
+      const hash = window.location.hash;
+      if (event === 'PASSWORD_RECOVERY' || hash.includes('type=recovery') || hash.includes('type=invite')) {
         setIsRecoveryMode(true);
       }
     });
