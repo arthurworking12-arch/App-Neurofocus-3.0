@@ -10,9 +10,10 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import NeuroSetup from './components/NeuroSetup';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { UserProfile, Task, TaskType, TaskPriority } from './types';
+import { UserProfile, Task, TaskType, TaskPriority, Subtask } from './types';
 import { Session } from '@supabase/supabase-js';
 import { Trophy, Zap, Crown } from 'lucide-react';
+import { decomposeTask } from './services/geminiService';
 
 const MOTIVATIONAL_QUOTES = [
   "Dopamina liberada! O cérebro agradece.",
@@ -147,17 +148,24 @@ const App: React.FC = () => {
          .eq('user_id', session.user.id);
        
        if (data) {
-          const today = new Date().toISOString().split('T')[0];
+          // FIX: Use LOCAL DATE instead of UTC to determine "today"
+          const now = new Date();
+          const localToday = now.getFullYear() + '-' + 
+                           String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                           String(now.getDate()).padStart(2, '0');
+
           const tasksToResetIds: string[] = [];
 
           const processedTasks = data.map((task: Task) => {
              const isRecurring = task.type === TaskType.DAILY || task.type === TaskType.HABIT;
              
              if (isRecurring && task.is_completed) {
-                const taskDate = task.last_completed_date ? task.last_completed_date.split(' ')[0].split('T')[0] : null;
+                // Parse the stored timestamp and compare date parts
+                // Assuming last_completed_date is stored as 'YYYY-MM-DD' or ISO
+                const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
                 
                 // Reset daily tasks only if the date is NOT today
-                if (taskDate !== today) {
+                if (taskLastDate !== localToday) {
                     tasksToResetIds.push(task.id);
                     // Reset points to base value for the new day roll
                     const basePoints = task.type === TaskType.HABIT ? 10 : 20;
@@ -172,7 +180,7 @@ const App: React.FC = () => {
           if (tasksToResetIds.length > 0) {
              // Batch update to reset daily tasks
              await (supabase.from('tasks') as any)
-               .update({ is_completed: false, points: 20 }) // Reset points too so RNG can run again tomorrow
+               .update({ is_completed: false, points: 20 }) 
                .in('id', tasksToResetIds);
           }
        }
@@ -225,16 +233,64 @@ const App: React.FC = () => {
       time: taskData.time,
       repeat_days: taskData.repeat_days,
       due_date: taskData.due_date,
-      energy_level: taskData.energy_level as any
+      energy_level: taskData.energy_level as any,
+      subtasks: [] // Initialize empty
     };
 
     setTasks([newTask, ...tasks]);
     await (supabase.from('tasks') as any).insert(newTask);
   };
 
+  const handleDecomposeTask = async (task: Task) => {
+    try {
+       const steps = await decomposeTask(task.title);
+       if (steps.length === 0) return;
+
+       const newSubtasks: Subtask[] = steps.map(step => ({
+          id: crypto.randomUUID(),
+          title: step,
+          is_completed: false
+       }));
+
+       // Optimistic Update
+       setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: newSubtasks } : t));
+
+       // Save to DB
+       await (supabase.from('tasks') as any)
+         .update({ subtasks: newSubtasks })
+         .eq('id', task.id);
+         
+       setToast({ message: "Neuro-Decomposição Concluída!", xp: 0, type: 'critical' });
+    } catch (e) {
+       console.error("Erro ao decompor tarefa", e);
+    }
+  };
+
+  const handleToggleSubtask = async (task: Task, subtaskId: string) => {
+     if (!task.subtasks) return;
+
+     const updatedSubtasks = task.subtasks.map(sub => 
+        sub.id === subtaskId ? { ...sub, is_completed: !sub.is_completed } : sub
+     );
+
+     // Optimistic Update
+     setTasks(tasks.map(t => t.id === task.id ? { ...t, subtasks: updatedSubtasks } : t));
+
+     // Save to DB
+     await (supabase.from('tasks') as any)
+        .update({ subtasks: updatedSubtasks })
+        .eq('id', task.id);
+  };
+
   const handleToggleTask = async (task: Task) => {
     const updatedStatus = !task.is_completed;
-    const today = new Date().toISOString().split('T')[0];
+    
+    // FIX: Use Local Date for today
+    const now = new Date();
+    const localToday = now.getFullYear() + '-' + 
+                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                       String(now.getDate()).padStart(2, '0');
+
     const taskLastDate = task.last_completed_date ? task.last_completed_date.split('T')[0] : null;
     
     let finalPoints = task.points; 
@@ -242,12 +298,9 @@ const App: React.FC = () => {
 
     if (updatedStatus) {
         // ANTI-FARM LOGIC:
-        // If task was already completed today (taskLastDate === today), we reuse the EXISTING points.
-        // We do NOT roll the dice again.
-        if (taskLastDate === today) {
+        if (taskLastDate === localToday) {
             finalPoints = task.points; // Keep existing points
             
-            // Re-calculate type just for visual feedback based on points
             const base = task.type === TaskType.HABIT ? 10 : 20;
             if (finalPoints >= base + 50) xpType = 'jackpot';
             else if (finalPoints >= base * 2) xpType = 'critical';
@@ -270,28 +323,22 @@ const App: React.FC = () => {
         }
     }
 
-    // Optimistic Update
     setTasks(tasks.map(t => t.id === task.id ? { 
         ...t, 
         is_completed: updatedStatus,
         points: finalPoints,
-        // If unchecking, we KEEP the last_completed_date as is, so the system knows it was touched today.
-        // Only update date if checking.
-        last_completed_date: updatedStatus ? today : t.last_completed_date 
+        last_completed_date: updatedStatus ? localToday : t.last_completed_date 
     } : t));
 
-    // Database Update
     if (updatedStatus) {
        await (supabase.from('tasks') as any).update({ 
           is_completed: true,
-          last_completed_date: today,
-          points: finalPoints // Save the rolled points
+          last_completed_date: localToday,
+          points: finalPoints 
        }).eq('id', task.id);
     } else {
        await (supabase.from('tasks') as any).update({ 
           is_completed: false,
-          // We DO NOT reset points here. We keep the "rolled" value in DB.
-          // We DO NOT clear the date.
        }).eq('id', task.id);
     }
 
@@ -300,18 +347,15 @@ const App: React.FC = () => {
       let newLevel = userProfile.level;
       let newCurrentXp = userProfile.current_xp;
       
-      // Dynamic Level Threshold: Level * 100
-      // Eg: Level 1 needs 100xp. Level 2 needs 200xp.
       let xpThreshold = newLevel * 100;
 
       if (updatedStatus) {
         newCurrentXp += finalPoints;
         
-        // Level Up Loop
         while (newCurrentXp >= xpThreshold) {
           newCurrentXp = newCurrentXp - xpThreshold;
           newLevel += 1;
-          xpThreshold = newLevel * 100; // Update threshold for next level
+          xpThreshold = newLevel * 100; 
         }
 
         let message = MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
@@ -321,10 +365,7 @@ const App: React.FC = () => {
         setToast({ message, xp: finalPoints, type: xpType });
 
       } else {
-        // Level Down Logic (Undo)
         newCurrentXp -= finalPoints;
-        
-        // Handle negative XP (level down)
         while (newCurrentXp < 0) {
            if (newLevel > 1) {
               newLevel -= 1;
@@ -487,7 +528,6 @@ const App: React.FC = () => {
     );
   }
 
-  // MAIN APP + ONBOARDING CHECK
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -507,6 +547,8 @@ const App: React.FC = () => {
           onAddTask={handleAddTask} 
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}
+          onDecomposeTask={handleDecomposeTask}
+          onToggleSubtask={handleToggleSubtask}
         />;
       case 'focus':
         return <FocusMode />;

@@ -1,9 +1,54 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Task, UserProfile } from "../types";
 
 // Função auxiliar para obter a instância da IA de forma segura
 const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Lazy init to prevent crashes if process is undefined in some envs
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+     return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+  // Fallback or throw custom error handled by caller
+  throw new Error("API Key não encontrada");
+};
+
+export const decomposeTask = async (taskTitle: string): Promise<string[]> => {
+  try {
+    const ai = getAIClient();
+    
+    const prompt = `
+      Aja como um especialista em produtividade (GTD/Neurociência).
+      O usuário tem uma tarefa complexa: "${taskTitle}".
+      
+      Quebre esta tarefa em 3 a 5 micro-passos acionáveis, lógicos e cronológicos.
+      Os passos devem ser curtos e diretos (começando com verbo).
+      
+      Retorne APENAS um JSON array de strings. Exemplo: ["Abrir documento", "Escrever introdução", "Revisar texto"].
+      Sem formatação markdown.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const rawText = response.text || "[]";
+    const cleanText = rawText.replace(/```json|```/g, '').trim();
+    
+    const steps = JSON.parse(cleanText);
+    
+    if (Array.isArray(steps)) {
+        return steps;
+    }
+    return [];
+
+  } catch (error) {
+    console.error("Erro na Neuro-Decomposição:", error);
+    return [];
+  }
 };
 
 export const getRoutineSuggestions = async (

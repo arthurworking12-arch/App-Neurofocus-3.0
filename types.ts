@@ -23,6 +23,12 @@ export enum TaskPriority {
   HIGH = 'high'
 }
 
+export interface Subtask {
+  id: string;
+  title: string;
+  is_completed: boolean;
+}
+
 export interface Task {
   id: string;
   user_id: string;
@@ -38,6 +44,7 @@ export interface Task {
   energy_level?: 'high' | 'medium' | 'low';
   points: number;
   created_at: string;
+  subtasks?: Subtask[];
 }
 
 export interface Challenge {

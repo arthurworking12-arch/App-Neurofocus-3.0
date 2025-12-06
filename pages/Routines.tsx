@@ -1,13 +1,16 @@
+
 import React, { useState } from 'react';
-import { Task, TaskType, UserProfile } from '../types';
-import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown } from 'lucide-react';
+import { Task, TaskType, UserProfile, Subtask } from '../types';
+import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown, CornerDownRight, Loader2 } from 'lucide-react';
 
 interface RoutinesProps {
   tasks: Task[];
-  user: UserProfile; // Added UserProfile prop
+  user: UserProfile; 
   onAddTask: (taskData: Partial<Task>) => Promise<void>;
   onToggleTask: (task: Task) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
+  onDecomposeTask?: (task: Task) => Promise<void>; // New Prop
+  onToggleSubtask?: (task: Task, subtaskId: string) => Promise<void>; // New Prop
 }
 
 const DAYS_OF_WEEK = [
@@ -24,8 +27,8 @@ const DAYS_OF_WEEK = [
 const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, lowEnergyEnd: number, peakTime: string, message: string }> = {
   lion: { 
     label: 'Leão (Matutino)', 
-    lowEnergyStart: 18, // Começa a cair às 18h
-    lowEnergyEnd: 24,   // Vai até o fim do dia
+    lowEnergyStart: 18, 
+    lowEnergyEnd: 24,   
     peakTime: '07:00',
     message: 'Leões funcionam com o sol. Tentar focar pesado à noite vai contra sua biologia.'
   },
@@ -39,7 +42,7 @@ const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, l
   wolf: { 
     label: 'Lobo (Noturno)', 
     lowEnergyStart: 6, 
-    lowEnergyEnd: 12, // Manhã é difícil (estendido até meio dia)
+    lowEnergyEnd: 12, 
     peakTime: '20:00',
     message: 'Lobos demoram a "ligar" o cérebro pela manhã.'
   },
@@ -52,13 +55,16 @@ const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, l
   }
 };
 
-const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTask, onDeleteTask }) => {
+const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTask, onDeleteTask, onDecomposeTask, onToggleSubtask }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   // Neuro-Biorhythm State
   const [showEnergyWarning, setShowEnergyWarning] = useState(false);
   const [pendingTaskData, setPendingTaskData] = useState<Partial<Task> | null>(null);
   const [energyContext, setEnergyContext] = useState<any>(null);
+
+  // Loading state for AI Decomposition
+  const [decomposingTaskId, setDecomposingTaskId] = useState<string | null>(null);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -128,6 +134,15 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
       }
   };
 
+  const handleDecomposeClick = async (e: React.MouseEvent, task: Task) => {
+    e.stopPropagation();
+    if (onDecomposeTask) {
+        setDecomposingTaskId(task.id);
+        await onDecomposeTask(task);
+        setDecomposingTaskId(null);
+    }
+  };
+
   const toggleDay = (dayId: string) => {
     if (selectedDays.includes(dayId)) {
       setSelectedDays(selectedDays.filter(d => d !== dayId));
@@ -174,76 +189,130 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
         ) : (
           sortedTasks.map((task) => (
             <div
-              key={task.id}
-              className={`group flex items-center justify-between p-4 rounded-xl border transition-all duration-300 ${
+                key={task.id} 
+                className={`group rounded-xl border transition-all duration-300 overflow-hidden ${
                 task.is_completed
-                  ? 'bg-neuro-surface/50 border-white/5 opacity-60'
-                  : 'bg-neuro-surface border-white/10 shadow-sm hover:border-neuro-primary/30 hover:shadow-glow-sm'
-              }`}
+                    ? 'bg-neuro-surface/50 border-white/5 opacity-60'
+                    : 'bg-neuro-surface border-white/10 shadow-sm hover:border-neuro-primary/30'
+                }`}
             >
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => onToggleTask(task)}
-                  className={`flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${
-                    task.is_completed
-                      ? 'bg-neuro-deep border-neuro-deep text-white'
-                      : 'border-neuro-muted/30 hover:border-neuro-secondary text-transparent'
-                  }`}
+                <div
+                    className="flex items-center justify-between p-4 cursor-pointer"
+                    onClick={() => onToggleTask(task)}
                 >
-                  <Check size={14} strokeWidth={3} />
-                </button>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className={`font-medium transition-all ${
-                      task.is_completed ? 'text-neuro-muted line-through decoration-neuro-muted/50' : 'text-white'
-                    }`}>
-                      {task.title}
-                    </h3>
-                    {task.time && (
-                      <span className="flex items-center gap-1 text-xs text-neuro-muted bg-neuro-base px-2 py-0.5 rounded-md font-mono border border-white/5">
-                         <Clock size={10} />
-                         {task.time}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-2 mt-1 items-center">
-                     <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
-                        task.type === TaskType.HABIT ? 'bg-purple-900/30 text-purple-300' :
-                        task.type === TaskType.DAILY ? 'bg-blue-900/30 text-blue-300' :
-                        'bg-orange-900/30 text-orange-300'
-                     }`}>
-                        {task.type === TaskType.HABIT ? 'Hábito' : task.type === TaskType.DAILY ? 'Rotina' : 'Tarefa'}
-                     </span>
-                     
-                     {task.repeat_days && task.repeat_days.length > 0 && (
-                        <div className="flex gap-0.5">
-                           {DAYS_OF_WEEK.map(d => (
-                              <span key={d.id} className={`text-[9px] w-3 h-3 flex items-center justify-center rounded-full ${
-                                 task.repeat_days?.includes(d.id) ? 'bg-neuro-primary text-white font-bold' : 'text-neuro-muted/30'
-                              }`}>
-                                {d.label}
-                              </span>
-                           ))}
+                    <div className="flex items-center gap-4">
+                        <div className={`flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${
+                            task.is_completed
+                            ? 'bg-neuro-deep border-neuro-deep text-white'
+                            : 'border-neuro-muted/30 hover:border-neuro-secondary text-transparent'
+                        }`}>
+                            <Check size={14} strokeWidth={3} />
                         </div>
-                     )}
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className={`font-medium transition-all ${
+                                    task.is_completed ? 'text-neuro-muted line-through decoration-neuro-muted/50' : 'text-white'
+                                }`}>
+                                    {task.title}
+                                </h3>
+                                {task.time && (
+                                    <span className="flex items-center gap-1 text-xs text-neuro-muted bg-neuro-base px-2 py-0.5 rounded-md font-mono border border-white/5">
+                                        <Clock size={10} />
+                                        {task.time}
+                                    </span>
+                                )}
+                            </div>
+                    
+                            <div className="flex flex-wrap gap-2 mt-1 items-center">
+                                <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                                    task.type === TaskType.HABIT ? 'bg-purple-900/30 text-purple-300' :
+                                    task.type === TaskType.DAILY ? 'bg-blue-900/30 text-blue-300' :
+                                    'bg-orange-900/30 text-orange-300'
+                                }`}>
+                                    {task.type === TaskType.HABIT ? 'Hábito' : task.type === TaskType.DAILY ? 'Rotina' : 'Tarefa'}
+                                </span>
+                                
+                                {task.repeat_days && task.repeat_days.length > 0 && (
+                                    <div className="flex gap-0.5">
+                                    {DAYS_OF_WEEK.map(d => (
+                                        <span key={d.id} className={`text-[9px] w-3 h-3 flex items-center justify-center rounded-full ${
+                                            task.repeat_days?.includes(d.id) ? 'bg-neuro-primary text-white font-bold' : 'text-neuro-muted/30'
+                                        }`}>
+                                            {d.label}
+                                        </span>
+                                    ))}
+                                    </div>
+                                )}
 
-                     {task.due_date && (
-                        <span className="text-[10px] text-neuro-muted flex items-center gap-1">
-                           <Calendar size={10} />
-                           {new Date(task.due_date).toLocaleDateString('pt-BR')}
-                        </span>
-                     )}
-                  </div>
+                                {task.due_date && (
+                                    <span className="text-[10px] text-neuro-muted flex items-center gap-1">
+                                    <Calendar size={10} />
+                                    {new Date(task.due_date).toLocaleDateString('pt-BR')}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        {/* DECOMPOSE BUTTON (Only for TODOs not completed and without subtasks yet) */}
+                        {task.type === TaskType.TODO && !task.is_completed && (!task.subtasks || task.subtasks.length === 0) && (
+                            <button
+                                onClick={(e) => handleDecomposeClick(e, task)}
+                                disabled={decomposingTaskId === task.id}
+                                className={`p-2 rounded-lg transition-all flex items-center gap-2 ${
+                                    decomposingTaskId === task.id 
+                                    ? 'bg-neuro-highlight text-neuro-muted cursor-wait' 
+                                    : 'text-neuro-secondary hover:bg-neuro-secondary/20 hover:text-white hover:scale-105'
+                                }`}
+                                title="Neuro-Decomposição com IA"
+                            >
+                                {decomposingTaskId === task.id ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} fill="currentColor" />}
+                                <span className="text-[10px] font-bold hidden md:inline uppercase tracking-wide">
+                                    {decomposingTaskId === task.id ? 'Analisando...' : 'Decompor'}
+                                </span>
+                            </button>
+                        )}
+
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }}
+                            className="p-2 text-neuro-muted hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                            <Trash2 size={18} />
+                        </button>
+                    </div>
                 </div>
-              </div>
 
-              <button
-                onClick={() => onDeleteTask(task.id)}
-                className="p-2 text-neuro-muted hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-              >
-                <Trash2 size={18} />
-              </button>
+                {/* SUBTASKS LIST */}
+                {task.subtasks && task.subtasks.length > 0 && (
+                    <div className="bg-black/20 border-t border-white/5 px-4 py-3 space-y-2 animate-in slide-in-from-top-2">
+                        <p className="text-[10px] text-neuro-muted uppercase tracking-widest pl-9 mb-2 flex items-center gap-1">
+                            <CornerDownRight size={12} />
+                            Micro-passos
+                        </p>
+                        {task.subtasks.map(sub => (
+                            <div 
+                                key={sub.id} 
+                                className="flex items-center gap-3 pl-8 hover:bg-white/5 p-1 rounded-lg cursor-pointer transition-colors"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if(onToggleSubtask) onToggleSubtask(task, sub.id);
+                                }}
+                            >
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                                    sub.is_completed 
+                                    ? 'bg-neuro-secondary border-neuro-secondary' 
+                                    : 'border-neuro-muted/50'
+                                }`}>
+                                    {sub.is_completed && <Check size={10} className="text-neuro-base" strokeWidth={4} />}
+                                </div>
+                                <span className={`text-sm ${sub.is_completed ? 'text-neuro-muted line-through' : 'text-gray-300'}`}>
+                                    {sub.title}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
           ))
         )}
