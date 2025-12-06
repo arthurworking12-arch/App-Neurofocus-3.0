@@ -512,59 +512,58 @@ const App: React.FC = () => {
     }
 
     try {
-      // Passo 1: Verifica se já temos uma sessão
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      
-      // Passo 2: Se não tiver sessão, usamos os tokens capturados para FORÇAR uma
-      if (!currentSession) {
-          const tokens = recoveryTokensRef.current;
-          
-          if (tokens?.access_token) {
-              const { error: sessionError } = await supabase.auth.setSession({
-                  access_token: tokens.access_token,
-                  refresh_token: tokens.refresh_token || tokens.access_token, // CORREÇÃO: Usa access_token como fallback se refresh for vazio
-              });
-              
-              if (sessionError) throw new Error("Link expirado ou inválido.");
-              
-              // Pequena pausa para garantir propagação
-              await new Promise(resolve => setTimeout(resolve, 100));
-          } else {
-             // Tenta ler da URL como último recurso
-             const hash = window.location.hash.substring(1);
-             const params = new URLSearchParams(hash);
-             const at = params.get('access_token');
-             const rt = params.get('refresh_token');
-             
-             // Relaxamento da verificação: Se tiver AT, prossegue
-             if (at) {
-                 const { error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt || at });
-                 if (error) throw new Error("Não foi possível validar o link.");
-             } else {
-                 throw new Error("Token de segurança não encontrado.");
-             }
-          }
+      // TENTATIVA 1: OTIMISTA
+      // Tenta atualizar a senha direto. Se a sessão automática funcionou (o que acontece 90% das vezes), isso passa.
+      const { error: optimisticError } = await supabase.auth.updateUser({ password: recoveryPassword });
+
+      if (!optimisticError) {
+          // Sucesso imediato!
+          finishRecovery();
+          return;
       }
 
-      // Passo 3: Com a sessão (esperançosamente) ativa, atualizamos a senha
-      const { error } = await supabase.auth.updateUser({ password: recoveryPassword });
+      // TENTATIVA 2: MANUAL (FALLBACK)
+      // Se deu erro, provavelmente é "Auth session missing". Vamos tentar forçar a sessão.
+      const tokens = recoveryTokensRef.current;
       
-      if (error) throw error;
-      
+      if (tokens && tokens.access_token) {
+          try {
+             // Tenta criar a sessão. 
+             // NOTA: Isso pode dar erro "token inválido" se o Supabase já tiver consumido o token na Tentativa 1 (auto).
+             // Mas nós ignoramos esse erro e tentamos o update de novo, porque às vezes a sessão foi criada mesmo com o erro.
+             await supabase.auth.setSession({
+                  access_token: tokens.access_token,
+                  refresh_token: tokens.refresh_token || tokens.access_token,
+              });
+          } catch (sessionError) {
+             console.log("Aviso: Tentativa manual de sessão falhou, mas vamos tentar atualizar a senha mesmo assim.", sessionError);
+          }
+          
+          // TENTATIVA 3: FINAL
+          const { error: finalError } = await supabase.auth.updateUser({ password: recoveryPassword });
+          
+          if (finalError) throw finalError;
+
+          finishRecovery();
+      } else {
+         throw new Error("Sessão não encontrada e sem tokens de recuperação.");
+      }
+
+    } catch (err: any) {
+      console.error(err);
+      setRecoveryMessage(err.message || 'Erro ao redefinir senha. O link pode ter expirado.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const finishRecovery = () => {
       setRecoveryMessage('Senha definida com sucesso! Acessando...');
-      
       setTimeout(() => {
         setIsRecoveryMode(false);
         window.location.hash = ''; // Limpa a URL
         window.location.reload(); 
       }, 1500);
-
-    } catch (err: any) {
-      console.error(err);
-      setRecoveryMessage(err.message || 'Erro ao redefinir senha.');
-    } finally {
-      setRecoveryLoading(false);
-    }
   };
 
   if (loading) {
