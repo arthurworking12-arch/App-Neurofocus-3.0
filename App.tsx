@@ -10,7 +10,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import NeuroSetup from './components/NeuroSetup';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
-import { UserProfile, Task, TaskType, TaskPriority, Subtask } from './types';
+import { UserProfile, Task, TaskType, TaskPriority, Subtask, UserActivity } from './types';
 import { Session } from '@supabase/supabase-js';
 import { Trophy, Zap, Crown } from 'lucide-react';
 import { decomposeTask } from './services/geminiService';
@@ -35,6 +35,7 @@ const App: React.FC = () => {
   
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [activityData, setActivityData] = useState<UserActivity[]>([]); // New State for Heatmap
   
   // State for Onboarding
   const [showSetup, setShowSetup] = useState(false);
@@ -45,6 +46,9 @@ const App: React.FC = () => {
   const [recoveryConfirm, setRecoveryConfirm] = useState('');
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState<string|null>(null);
+
+  // DEEP FOCUS STATE
+  const [focusedTask, setFocusedTask] = useState<Task | null>(null);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; xp: number; type: 'normal' | 'critical' | 'jackpot' } | null>(null);
@@ -84,6 +88,7 @@ const App: React.FC = () => {
     if (session?.user && !isRecoveryMode) {
       fetchUserProfile();
       fetchTasks();
+      fetchActivityHistory(); // Fetch heatmap data
     }
   }, [session, isRecoveryMode]);
 
@@ -188,6 +193,24 @@ const App: React.FC = () => {
      } catch (e: any) {
        console.error("Erro ao buscar tarefas:", e.message || e);
      }
+  };
+
+  const fetchActivityHistory = async () => {
+    if (!session?.user) return;
+    try {
+      // Fetch user_activity table
+      const { data, error } = await supabase
+        .from('user_activity')
+        .select('date, count, total_xp')
+        .eq('user_id', session.user.id)
+        .gte('date', new Date(new Date().setDate(new Date().getDate() - 365)).toISOString());
+
+      if (data) {
+        setActivityData(data);
+      }
+    } catch (e) {
+      console.error("Erro ao buscar histórico de atividade", e);
+    }
   };
 
   const handleSetupComplete = async (username: string, chronotype: string) => {
@@ -315,6 +338,73 @@ const App: React.FC = () => {
         .eq('id', task.id);
   };
 
+  // --- DEEP FOCUS LOGIC ---
+  const handleStartFocusSession = (task: Task) => {
+     setFocusedTask(task);
+     setActiveTab('focus');
+  };
+
+  const handleCompleteFocusSession = async () => {
+    if (focusedTask) {
+        await handleToggleTask(focusedTask);
+        setFocusedTask(null); // Clear focused state after completion
+    }
+  };
+
+  const updateActivityLog = async (isCompleted: boolean, points: number) => {
+    if (!session?.user) return;
+    
+    const now = new Date();
+    const localToday = now.getFullYear() + '-' + 
+                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                       String(now.getDate()).padStart(2, '0');
+
+    // Optimistic Update for UI Heatmap
+    const existingEntryIndex = activityData.findIndex(a => a.date === localToday);
+    const newActivityData = [...activityData];
+
+    if (existingEntryIndex >= 0) {
+      const entry = newActivityData[existingEntryIndex];
+      newActivityData[existingEntryIndex] = {
+        ...entry,
+        count: isCompleted ? entry.count + 1 : Math.max(0, entry.count - 1),
+        total_xp: isCompleted ? entry.total_xp + points : Math.max(0, entry.total_xp - points)
+      };
+    } else if (isCompleted) {
+      newActivityData.push({ date: localToday, count: 1, total_xp: points });
+    }
+    setActivityData(newActivityData);
+
+    try {
+      // DB call to sync user_activity using upsert logic
+      // Since supabase-js upsert is easy, we assume we might need to fetch first or let trigger handle it?
+      // For simplicity in this env, we will try to fetch today's row, if exists update, else insert.
+      const { data: todayRow } = await supabase
+        .from('user_activity')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('date', localToday)
+        .single();
+        
+      if (todayRow) {
+         await supabase.from('user_activity').update({
+            count: isCompleted ? todayRow.count + 1 : Math.max(0, todayRow.count - 1),
+            total_xp: isCompleted ? todayRow.total_xp + points : Math.max(0, todayRow.total_xp - points)
+         }).eq('id', todayRow.id);
+      } else if (isCompleted) {
+         await supabase.from('user_activity').insert({
+            user_id: session.user.id,
+            date: localToday,
+            count: 1,
+            total_xp: points
+         });
+      }
+
+    } catch (e) {
+      console.error("Erro ao atualizar log de atividade", e);
+    }
+  };
+
   const handleToggleTask = async (task: Task) => {
     const updatedStatus = !task.is_completed;
     
@@ -366,6 +456,9 @@ const App: React.FC = () => {
         points: finalPoints,
         last_completed_date: updatedStatus ? localToday : t.last_completed_date 
     } : t));
+
+    // --- UPDATE ACTIVITY HEATMAP ---
+    updateActivityLog(updatedStatus, finalPoints);
 
     if (updatedStatus) {
        await (supabase.from('tasks') as any).update({ 
@@ -581,6 +674,8 @@ const App: React.FC = () => {
              if (task) handleToggleTask(task);
           }} 
           onNavigate={setActiveTab}
+          activityData={activityData}
+          onStartFocus={handleStartFocusSession} // Pass Deep Focus Handler
         />;
       case 'routines':
         return <Routines 
@@ -592,9 +687,13 @@ const App: React.FC = () => {
           onDeleteTask={handleDeleteTask}
           onDecomposeTask={handleDecomposeTask}
           onToggleSubtask={handleToggleSubtask}
+          onStartFocus={handleStartFocusSession} // Pass Deep Focus Handler
         />;
       case 'focus':
-        return <FocusMode />;
+        return <FocusMode 
+          focusedTask={focusedTask}
+          onCompleteTask={handleCompleteFocusSession}
+        />;
       case 'insights':
         return <Insights tasks={tasks} />;
       case 'chat':
@@ -607,6 +706,8 @@ const App: React.FC = () => {
           user={userProfile!} 
           onToggleTask={() => {}} 
           onNavigate={setActiveTab}
+          activityData={activityData}
+          onStartFocus={handleStartFocusSession}
         />;
     }
   };

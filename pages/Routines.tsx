@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Task, TaskType, UserProfile, Subtask } from '../types';
-import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown, CornerDownRight, Loader2, Pencil } from 'lucide-react';
+import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown, CornerDownRight, Loader2, Pencil, Play } from 'lucide-react';
 
 interface RoutinesProps {
   tasks: Task[];
@@ -12,6 +12,7 @@ interface RoutinesProps {
   onDeleteTask: (taskId: string) => Promise<void>;
   onDecomposeTask?: (task: Task) => Promise<void>;
   onToggleSubtask?: (task: Task, subtaskId: string) => Promise<void>;
+  onStartFocus?: (task: Task) => void; // Prop para Deep Focus
 }
 
 const DAYS_OF_WEEK = [
@@ -56,7 +57,7 @@ const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, l
   }
 };
 
-const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onEditTask, onToggleTask, onDeleteTask, onDecomposeTask, onToggleSubtask }) => {
+const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onEditTask, onToggleTask, onDeleteTask, onDecomposeTask, onToggleSubtask, onStartFocus }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   
@@ -291,6 +292,17 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onEditTask,
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {/* DEEP FOCUS BUTTON (PLAY) */}
+                        {!task.is_completed && onStartFocus && (
+                           <button
+                              onClick={(e) => { e.stopPropagation(); onStartFocus(task); }}
+                              className="p-2 text-neuro-secondary hover:text-white hover:bg-neuro-secondary rounded-lg transition-all"
+                              title="Iniciar Foco Profundo"
+                           >
+                              <Play size={18} fill="currentColor" />
+                           </button>
+                        )}
+
                         {/* DECOMPOSE BUTTON */}
                         {task.type === TaskType.TODO && !task.is_completed && (!task.subtasks || task.subtasks.length === 0) && (
                             <button

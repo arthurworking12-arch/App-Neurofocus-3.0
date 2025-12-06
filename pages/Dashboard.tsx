@@ -1,15 +1,38 @@
-import React, { useMemo } from 'react';
-import { Task, UserProfile, TaskType } from '../types';
-import { CheckCircle2, Flame, ArrowRight, Zap, Target } from 'lucide-react';
+
+import React, { useMemo, useState, useEffect } from 'react';
+import { Task, UserProfile, TaskType, UserActivity } from '../types';
+import { CheckCircle2, Flame, ArrowRight, Zap, Target, Play } from 'lucide-react';
+import ActivityHeatmap from '../components/ActivityHeatmap';
 
 interface DashboardProps {
   tasks: Task[];
   user: UserProfile;
   onToggleTask: (taskId: string) => void;
   onNavigate: (tab: string) => void;
+  activityData?: UserActivity[];
+  onStartFocus?: (task: Task) => void; // Prop for deep focus
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavigate, activityData, onStartFocus }) => {
+  // Estado local para a data e hora em tempo real
+  const [currentDate, setCurrentDate] = useState(new Date());
+
+  useEffect(() => {
+    const updateTime = () => setCurrentDate(new Date());
+    
+    // Atualiza a cada 60 segundos
+    const interval = setInterval(updateTime, 60000);
+    
+    // Atualiza imediatamente ao focar na janela (se o usuário voltar de outra aba)
+    const handleFocus = () => updateTime();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
   const dailyTasks = useMemo(() => 
     tasks.filter(t => t.type === TaskType.DAILY || t.type === TaskType.HABIT).slice(0, 5), 
   [tasks]);
@@ -23,25 +46,25 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavi
     : 0;
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
+    const hour = currentDate.getHours();
     if (hour < 12) return 'Bom dia';
     if (hour < 18) return 'Boa tarde';
     return 'Boa noite';
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8 animate-in fade-in duration-500 pb-20">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
         <div>
           <div className="flex items-center gap-2 mb-2">
              <div className="w-2 h-2 rounded-full bg-neuro-primary animate-pulse shadow-glow"></div>
              <p className="text-neuro-muted text-sm font-medium uppercase tracking-widest">
-                {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                {currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
              </p>
           </div>
           <h2 className="text-3xl md:text-5xl font-sans font-bold text-white tracking-tight">
-            {getGreeting()}, <span className="text-neuro-primary">{user.username || 'Membro'}</span>.
+            {getGreeting()}, <span className="text-neuro-primary">{user.username || 'Membro'}.</span>
           </h2>
         </div>
         
@@ -94,6 +117,11 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavi
         </div>
       </div>
 
+      {/* HEATMAP SECTION */}
+      {activityData && activityData.length > 0 && (
+         <ActivityHeatmap activityData={activityData} />
+      )}
+
       {/* Task List Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-neuro-surface p-6 rounded-3xl border border-white/5 shadow-sm hover:border-neuro-primary/20 transition-all duration-300">
@@ -116,18 +144,31 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, user, onToggleTask, onNavi
               dailyTasks.map(task => (
                 <div 
                   key={task.id}
-                  className="flex items-center gap-3 p-4 rounded-2xl bg-neuro-base/50 border border-transparent hover:border-neuro-primary/30 hover:shadow-glow-sm transition-all duration-200 group cursor-pointer"
+                  className="flex items-center justify-between p-4 rounded-2xl bg-neuro-base/50 border border-transparent hover:border-neuro-primary/30 hover:shadow-glow-sm transition-all duration-200 group cursor-pointer"
                   onClick={() => onToggleTask(task.id)}
                 >
-                  <div className={`
-                    w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all duration-300
-                    ${task.is_completed ? 'bg-neuro-primary border-neuro-primary shadow-glow' : 'border-neuro-muted/30 group-hover:border-neuro-secondary'}
-                  `}>
-                    {task.is_completed && <CheckCircle2 size={14} className="text-white" />}
+                  <div className="flex items-center gap-3">
+                    <div className={`
+                        w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all duration-300
+                        ${task.is_completed ? 'bg-neuro-primary border-neuro-primary shadow-glow' : 'border-neuro-muted/30 group-hover:border-neuro-secondary'}
+                    `}>
+                        {task.is_completed && <CheckCircle2 size={14} className="text-white" />}
+                    </div>
+                    <span className={`text-sm font-medium transition-colors ${task.is_completed ? 'text-neuro-muted line-through decoration-neuro-muted/50' : 'text-gray-200'}`}>
+                        {task.title}
+                    </span>
                   </div>
-                  <span className={`text-sm font-medium transition-colors ${task.is_completed ? 'text-neuro-muted line-through decoration-neuro-muted/50' : 'text-gray-200'}`}>
-                    {task.title}
-                  </span>
+
+                  {/* DEEP FOCUS PLAY BUTTON */}
+                  {!task.is_completed && onStartFocus && (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onStartFocus(task); }}
+                        className="p-2 text-neuro-secondary hover:text-white hover:bg-neuro-secondary rounded-full opacity-0 group-hover:opacity-100 transition-all"
+                        title="Iniciar Foco"
+                    >
+                        <Play size={16} fill="currentColor" />
+                    </button>
+                  )}
                 </div>
               ))
             )}

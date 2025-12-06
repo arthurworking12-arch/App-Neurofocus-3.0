@@ -47,6 +47,12 @@ export interface Task {
   subtasks?: Subtask[];
 }
 
+export interface UserActivity {
+  date: string;
+  count: number;
+  total_xp: number;
+}
+
 export interface Challenge {
   id: string;
   title: string;
@@ -87,6 +93,12 @@ export type Database = {
         Row: Task
         Insert: Task
         Update: Partial<Task>
+        Relationships: []
+      }
+      user_activity: {
+        Row: UserActivity
+        Insert: UserActivity
+        Update: Partial<UserActivity>
         Relationships: []
       }
       focus_sessions: {
