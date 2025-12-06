@@ -100,11 +100,13 @@ const App: React.FC = () => {
     if (!session?.user) return;
     
     try {
-      const { data, error } = await supabase
+      const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .single();
+      
+      const data = profileData as UserProfile | null;
 
       if (error && error.code !== 'PGRST116') {
          console.error("Erro ao buscar perfil:", error.message);
@@ -155,11 +157,13 @@ const App: React.FC = () => {
       yesterdayDate.setDate(yesterdayDate.getDate() - 1);
       const yesterday = yesterdayDate.toISOString().split('T')[0];
 
-      const { data } = await supabase
+      const { data: activityResult } = await supabase
         .from('user_activity')
         .select('date, count')
         .eq('user_id', session.user.id)
         .in('date', [yesterday, today]);
+
+      const data = activityResult as { date: string, count: number }[] | null;
 
       const hasActivityToday = data?.some(a => a.date === today && a.count > 0);
       const hasActivityYesterday = data?.some(a => a.date === yesterday && a.count > 0);
@@ -407,20 +411,22 @@ const App: React.FC = () => {
     }
 
     try {
-      const { data: todayRow } = await supabase
+      const { data: rawTodayRow } = await supabase
         .from('user_activity')
         .select('*')
         .eq('user_id', session.user.id)
         .eq('date', localToday)
         .single();
+      
+      const todayRow = rawTodayRow as UserActivity | null;
         
       if (todayRow) {
-         await supabase.from('user_activity').update({
+         await (supabase.from('user_activity') as any).update({
             count: isCompleted ? todayRow.count + 1 : Math.max(0, todayRow.count - 1),
             total_xp: isCompleted ? todayRow.total_xp + points : Math.max(0, todayRow.total_xp - points)
          }).eq('id', todayRow.id);
       } else if (isCompleted) {
-         await supabase.from('user_activity').insert({
+         await (supabase.from('user_activity') as any).insert({
             user_id: session.user.id,
             date: localToday,
             count: 1,
