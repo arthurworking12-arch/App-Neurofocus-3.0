@@ -56,18 +56,21 @@ const App: React.FC = () => {
   });
 
   // --- CAPTURA DE TOKENS PARA FORÇA BRUTA ---
-  // Captura os tokens imediatamente ao montar o componente para garantir que não sejam perdidos.
-  const recoveryTokensRef = useRef<{ access_token: string, refresh_token: string } | null>(null);
+  const recoveryTokensRef = useRef<{ access_token: string, refresh_token: string | null } | null>(null);
   
+  // Captura tokens IMEDIATAMENTE antes de qualquer renderização ou limpeza de URL
   if (!recoveryTokensRef.current && typeof window !== 'undefined') {
      const hash = window.location.hash.substring(1);
      const params = new URLSearchParams(hash);
      const at = params.get('access_token');
      const rt = params.get('refresh_token');
      
-     // CORREÇÃO CRÍTICA: Aceita se tiver APENAS o access_token, pois o refresh pode vir vazio
      if (at) {
-        recoveryTokensRef.current = { access_token: at, refresh_token: rt || at }; // Usa o AT como fallback se RT for vazio
+        // Se refresh_token for string vazia ou null, salvamos como null para não quebrar o setSession
+        recoveryTokensRef.current = { 
+            access_token: at, 
+            refresh_token: rt && rt.length > 0 ? rt : null 
+        };
      }
   }
 
@@ -499,7 +502,7 @@ const App: React.FC = () => {
     playSound('check', 0.4);
   };
   
-  // --- MANUSEIO DE REDEFINIÇÃO DE SENHA "A PROVA DE FALHAS" ---
+  // --- MANUSEIO DE REDEFINIÇÃO DE SENHA "A PROVA DE FALHAS" (Versão V3) ---
   const handlePasswordRecoveryReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryLoading(true);
@@ -512,46 +515,49 @@ const App: React.FC = () => {
     }
 
     try {
-      // TENTATIVA 1: OTIMISTA
-      // Tenta atualizar a senha direto. Se a sessão automática funcionou (o que acontece 90% das vezes), isso passa.
-      const { error: optimisticError } = await supabase.auth.updateUser({ password: recoveryPassword });
-
-      if (!optimisticError) {
-          // Sucesso imediato!
-          finishRecovery();
-          return;
-      }
-
-      // TENTATIVA 2: MANUAL (FALLBACK)
-      // Se deu erro, provavelmente é "Auth session missing". Vamos tentar forçar a sessão.
-      const tokens = recoveryTokensRef.current;
+      // ETAPA 1: VERIFICAÇÃO DE SESSÃO EXISTENTE
+      // Consultamos diretamente o Supabase (sem depender do estado React)
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
       
-      if (tokens && tokens.access_token) {
-          try {
-             // Tenta criar a sessão. 
-             // NOTA: Isso pode dar erro "token inválido" se o Supabase já tiver consumido o token na Tentativa 1 (auto).
-             // Mas nós ignoramos esse erro e tentamos o update de novo, porque às vezes a sessão foi criada mesmo com o erro.
-             await supabase.auth.setSession({
-                  access_token: tokens.access_token,
-                  refresh_token: tokens.refresh_token || tokens.access_token,
-              });
-          } catch (sessionError) {
-             console.log("Aviso: Tentativa manual de sessão falhou, mas vamos tentar atualizar a senha mesmo assim.", sessionError);
-          }
-          
-          // TENTATIVA 3: FINAL
-          const { error: finalError } = await supabase.auth.updateUser({ password: recoveryPassword });
-          
-          if (finalError) throw finalError;
+      let sessionActive = !!currentSession;
 
-          finishRecovery();
-      } else {
-         throw new Error("Sessão não encontrada e sem tokens de recuperação.");
+      // ETAPA 2: FORÇA BRUTA (Se não houver sessão)
+      if (!sessionActive) {
+          const tokens = recoveryTokensRef.current;
+          
+          if (tokens && tokens.access_token) {
+              try {
+                 // Prepara a sessão manualmente
+                 const { error: sessionError } = await supabase.auth.setSession({
+                      access_token: tokens.access_token,
+                      refresh_token: tokens.refresh_token || tokens.access_token, // Fallback se refresh for null
+                  });
+
+                  if (sessionError) {
+                      console.log("Aviso ao forçar sessão:", sessionError.message);
+                      // Não damos throw aqui, tentamos continuar pois às vezes a sessão funciona mesmo com erro de 'token used'
+                  }
+                  
+                  // Pequeno delay tático para garantir que o cliente Supabase propagou a sessão internamente
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                  sessionActive = true; 
+
+              } catch (err) {
+                 console.warn("Erro ao tentar forçar sessão:", err);
+              }
+          }
       }
+
+      // ETAPA 3: ATUALIZAÇÃO DA SENHA
+      const { error: finalError } = await supabase.auth.updateUser({ password: recoveryPassword });
+      
+      if (finalError) throw finalError;
+
+      finishRecovery();
 
     } catch (err: any) {
       console.error(err);
-      setRecoveryMessage(err.message || 'Erro ao redefinir senha. O link pode ter expirado.');
+      setRecoveryMessage(err.message || 'Erro ao redefinir senha. O link pode ter expirado ou já foi usado.');
     } finally {
       setRecoveryLoading(false);
     }
