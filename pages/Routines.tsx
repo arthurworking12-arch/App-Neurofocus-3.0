@@ -1,16 +1,17 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task, TaskType, UserProfile, Subtask } from '../types';
-import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown, CornerDownRight, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Check, Sparkles, Clock, Calendar, X, Zap, TrendingDown, CornerDownRight, Loader2, Pencil } from 'lucide-react';
 
 interface RoutinesProps {
   tasks: Task[];
   user: UserProfile; 
   onAddTask: (taskData: Partial<Task>) => Promise<void>;
+  onEditTask: (task: Task) => Promise<void>; // Prop para editar
   onToggleTask: (task: Task) => Promise<void>;
   onDeleteTask: (taskId: string) => Promise<void>;
-  onDecomposeTask?: (task: Task) => Promise<void>; // New Prop
-  onToggleSubtask?: (task: Task, subtaskId: string) => Promise<void>; // New Prop
+  onDecomposeTask?: (task: Task) => Promise<void>;
+  onToggleSubtask?: (task: Task, subtaskId: string) => Promise<void>;
 }
 
 const DAYS_OF_WEEK = [
@@ -55,8 +56,9 @@ const CHRONOTYPE_DATA: Record<string, { label: string, lowEnergyStart: number, l
   }
 };
 
-const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTask, onDeleteTask, onDecomposeTask, onToggleSubtask }) => {
+const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onEditTask, onToggleTask, onDeleteTask, onDecomposeTask, onToggleSubtask }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   
   // Neuro-Biorhythm State
   const [showEnergyWarning, setShowEnergyWarning] = useState(false);
@@ -73,6 +75,18 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState('');
 
+  // Effect to populate form when editing
+  useEffect(() => {
+    if (editingTask) {
+        setTitle(editingTask.title);
+        setType(editingTask.type);
+        setTime(editingTask.time || '');
+        setSelectedDays(editingTask.repeat_days || []);
+        setDueDate(editingTask.due_date || '');
+        setIsModalOpen(true);
+    }
+  }, [editingTask]);
+
   const resetForm = () => {
     setTitle('');
     setType(TaskType.DAILY);
@@ -80,9 +94,15 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
     setSelectedDays([]);
     setDueDate('');
     setIsModalOpen(false);
+    setEditingTask(null); // Clear editing state
     setShowEnergyWarning(false);
     setPendingTaskData(null);
     setEnergyContext(null);
+  };
+
+  const handleEditClick = (e: React.MouseEvent, task: Task) => {
+      e.stopPropagation();
+      setEditingTask(task);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,38 +118,54 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
     };
 
     // --- NEURO-BIORRITMO CHECK (Dinâmico) ---
-    const userChronotype = user.chronotype || 'bear'; // Default
-    const chronoData = CHRONOTYPE_DATA[userChronotype];
-
-    if (time && chronoData) {
-        const hour = parseInt(time.split(':')[0], 10);
+    // Apenas checa biorritmo se estiver criando ou se mudou o horário
+    if (time) {
+        const userChronotype = user.chronotype || 'bear';
+        const chronoData = CHRONOTYPE_DATA[userChronotype];
         
-        // Verifica se está na janela de baixa energia do cronotipo
-        if (hour >= chronoData.lowEnergyStart && hour < chronoData.lowEnergyEnd) {
-            setPendingTaskData(taskPayload);
-            setEnergyContext(chronoData);
-            setShowEnergyWarning(true);
-            return; // Interrompe envio
+        if (chronoData) {
+            const hour = parseInt(time.split(':')[0], 10);
+            
+            // Só avisa se o horário mudou ou é novo e cai na janela ruim
+            const isTimeChanged = !editingTask || editingTask.time !== time;
+            
+            if (isTimeChanged && hour >= chronoData.lowEnergyStart && hour < chronoData.lowEnergyEnd) {
+                setPendingTaskData(taskPayload);
+                setEnergyContext(chronoData);
+                setShowEnergyWarning(true);
+                return; // Interrompe envio
+            }
         }
     }
 
-    // Se estiver tudo ok, cria direto
-    await onAddTask(taskPayload);
+    if (editingTask) {
+        await onEditTask({ ...editingTask, ...taskPayload });
+    } else {
+        await onAddTask(taskPayload);
+    }
     resetForm();
   };
 
   const handleConfirmOptimization = async () => {
       if (pendingTaskData && energyContext) {
-          // Muda para o horário de pico sugerido pelo cronotipo
-          await onAddTask({ ...pendingTaskData, time: energyContext.peakTime, energy_level: 'high' });
+          const optimizedPayload = { ...pendingTaskData, time: energyContext.peakTime, energy_level: 'high' as const };
+          if (editingTask) {
+             await onEditTask({ ...editingTask, ...optimizedPayload });
+          } else {
+             await onAddTask(optimizedPayload);
+          }
           resetForm();
       }
   };
 
   const handleConfirmOriginal = async () => {
       if (pendingTaskData) {
-          // Mantém horário original mas marca como baixa energia
-          await onAddTask({ ...pendingTaskData, energy_level: 'low' });
+          const originalPayload = { ...pendingTaskData, energy_level: 'low' as const };
+          if (editingTask) {
+             await onEditTask({ ...editingTask, ...originalPayload });
+          } else {
+             await onAddTask(originalPayload);
+          }
           resetForm();
       }
   };
@@ -255,7 +291,7 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {/* DECOMPOSE BUTTON (Only for TODOs not completed and without subtasks yet) */}
+                        {/* DECOMPOSE BUTTON */}
                         {task.type === TaskType.TODO && !task.is_completed && (!task.subtasks || task.subtasks.length === 0) && (
                             <button
                                 onClick={(e) => handleDecomposeClick(e, task)}
@@ -274,9 +310,19 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
                             </button>
                         )}
 
+                        {/* EDIT BUTTON */}
+                        <button
+                            onClick={(e) => handleEditClick(e, task)}
+                            className="p-2 text-neuro-muted hover:text-white hover:bg-neuro-highlight rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="Editar"
+                        >
+                            <Pencil size={18} />
+                        </button>
+
                         <button
                             onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }}
                             className="p-2 text-neuro-muted hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                            title="Excluir"
                         >
                             <Trash2 size={18} />
                         </button>
@@ -318,7 +364,7 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
         )}
       </div>
 
-      {/* CREATE MODAL */}
+      {/* CREATE/EDIT MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-neuro-surface rounded-3xl shadow-2xl shadow-neuro-base border border-white/10 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 relative">
@@ -356,7 +402,9 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
               )}
 
               <div className="flex justify-between items-center p-6 border-b border-white/5">
-                 <h3 className="text-xl font-serif font-bold text-white">Nova Atividade</h3>
+                 <h3 className="text-xl font-serif font-bold text-white">
+                    {editingTask ? 'Editar Atividade' : 'Nova Atividade'}
+                 </h3>
                  <button onClick={resetForm} className="text-neuro-muted hover:text-white transition-colors">
                     <X size={24} />
                  </button>
@@ -456,7 +504,7 @@ const Routines: React.FC<RoutinesProps> = ({ tasks, user, onAddTask, onToggleTas
                     className="w-full mt-4 bg-neuro-primary hover:bg-neuro-secondary text-white py-4 rounded-xl font-medium shadow-glow flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-neuro-secondary/20"
                  >
                     <Check size={18} />
-                    Confirmar
+                    {editingTask ? 'Salvar Alterações' : 'Confirmar'}
                  </button>
               </form>
            </div>

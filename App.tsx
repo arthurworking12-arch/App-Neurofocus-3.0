@@ -244,6 +244,32 @@ const App: React.FC = () => {
     playSound('check', 0.2); // Subtle sound on add
   };
 
+  const handleEditTask = async (updatedTask: Task) => {
+    if (!session?.user) return;
+
+    // Optimistic Update
+    setTasks(tasks.map(t => t.id === updatedTask.id ? updatedTask : t));
+
+    try {
+      const { error } = await (supabase.from('tasks') as any)
+        .update({
+          title: updatedTask.title,
+          type: updatedTask.type,
+          time: updatedTask.time,
+          repeat_days: updatedTask.repeat_days,
+          due_date: updatedTask.due_date,
+          // We preserve points, completion status, subtasks etc.
+        })
+        .eq('id', updatedTask.id);
+
+      if (error) throw error;
+      playSound('click', 0.2);
+    } catch (e: any) {
+      console.error("Erro ao editar tarefa:", e);
+      // Revert optimism if needed (not implementing revert for simplicity here)
+    }
+  };
+
   const handleDecomposeTask = async (task: Task) => {
     try {
        const steps = await decomposeTask(task.title);
@@ -561,6 +587,7 @@ const App: React.FC = () => {
           tasks={tasks} 
           user={userProfile!}
           onAddTask={handleAddTask} 
+          onEditTask={handleEditTask}
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}
           onDecomposeTask={handleDecomposeTask}
