@@ -12,7 +12,7 @@ import NeuroSetup from './components/NeuroSetup';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { UserProfile, Task, TaskType, TaskPriority, Subtask, UserActivity } from './types';
 import { Session } from '@supabase/supabase-js';
-import { Trophy, Zap, Crown } from 'lucide-react';
+import { Trophy, Zap, Crown, Loader2 } from 'lucide-react'; // Added Loader2 import
 import { decomposeTask } from './services/geminiService';
 import { playSound } from './services/soundService';
 
@@ -627,6 +627,20 @@ const App: React.FC = () => {
   }
 
   if (isRecoveryMode) {
+    // IMPORTANT: Wait for session to be active before showing the password form
+    // The link contains a token that Supabase needs to process to create a session
+    if (!session) {
+       return (
+        <div className="min-h-screen bg-neuro-base flex flex-col items-center justify-center p-4">
+             <div className="flex items-center gap-3 text-white mb-4">
+                <Loader2 className="animate-spin text-neuro-primary" size={32} />
+                <span className="text-xl font-medium">Validando link de segurança...</span>
+             </div>
+             <p className="text-neuro-muted text-sm">Aguarde enquanto autenticamos seu acesso.</p>
+        </div>
+       );
+    }
+
     return (
       <div className="min-h-screen bg-neuro-base flex items-center justify-center p-4 relative overflow-hidden">
         <div className="max-w-md w-full bg-neuro-surface/50 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/5 p-8 relative z-10 animate-in fade-in zoom-in duration-300">
