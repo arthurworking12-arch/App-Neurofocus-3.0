@@ -48,6 +48,8 @@ export interface Task {
 }
 
 export interface UserActivity {
+  id: string;
+  user_id: string;
   date: string;
   count: number;
   total_xp: number;
@@ -97,7 +99,7 @@ export type Database = {
       }
       user_activity: {
         Row: UserActivity
-        Insert: UserActivity
+        Insert: Omit<UserActivity, 'id'>
         Update: Partial<UserActivity>
         Relationships: []
       }

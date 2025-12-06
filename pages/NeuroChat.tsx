@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, Task } from '../types';
 import { createChatSession } from '../services/geminiService';
-import { Send, User, Bot, Loader2 } from 'lucide-react';
+import { Send, User, Bot, Loader2, AlertCircle } from 'lucide-react';
 import { Chat, GenerateContentResponse } from "@google/genai";
 
 interface NeuroChatProps {
@@ -20,12 +21,20 @@ const NeuroChat: React.FC<NeuroChatProps> = ({ user, tasks }) => {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  
   const chatSessionRef = useRef<Chat | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Initialize chat session on mount
-    chatSessionRef.current = createChatSession(user, tasks);
+    // Inicialização segura do Chat
+    try {
+        setInitError(null);
+        chatSessionRef.current = createChatSession(user, tasks);
+    } catch (err: any) {
+        console.error("Erro ao iniciar NeuroChat:", err);
+        setInitError("Não foi possível conectar à Inteligência Artificial. Verifique se a chave de API está configurada corretamente na Vercel.");
+    }
   }, [user, tasks]);
 
   useEffect(() => {
@@ -57,6 +66,20 @@ const NeuroChat: React.FC<NeuroChatProps> = ({ user, tasks }) => {
       setLoading(false);
     }
   };
+
+  if (initError) {
+      return (
+        <div className="h-[calc(100vh-140px)] flex flex-col items-center justify-center text-center p-8 animate-in fade-in">
+            <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                <AlertCircle size={32} />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Sistema Offline</h2>
+            <p className="text-neuro-muted max-w-md">
+                {initError}
+            </p>
+        </div>
+      )
+  }
 
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col max-w-4xl mx-auto animate-in fade-in duration-500">

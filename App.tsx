@@ -235,7 +235,7 @@ const App: React.FC = () => {
     try {
       const { data } = await supabase
         .from('user_activity')
-        .select('date, count, total_xp')
+        .select('*') // Changed to select all fields to match UserActivity type
         .eq('user_id', session.user.id)
         .gte('date', new Date(new Date().setDate(new Date().getDate() - 365)).toISOString());
 
@@ -399,7 +399,13 @@ const App: React.FC = () => {
          currentStreak = Math.max(0, currentStreak - 1);
       }
     } else if (isCompleted) {
-      newActivityData.push({ date: localToday, count: 1, total_xp: points });
+      newActivityData.push({ 
+        id: crypto.randomUUID(), 
+        user_id: session.user.id,
+        date: localToday, 
+        count: 1, 
+        total_xp: points 
+      });
       currentStreak += 1;
     }
     setActivityData(newActivityData);

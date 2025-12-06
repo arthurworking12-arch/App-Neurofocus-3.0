@@ -4,12 +4,30 @@ import { Task, UserProfile } from "../types";
 
 // Função auxiliar para obter a instância da IA de forma segura
 const getAIClient = () => {
-  // Lazy init to prevent crashes if process is undefined in some envs
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-     return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  let apiKey: string | undefined;
+
+  // Tentativa segura de acessar import.meta.env (Vite)
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+        // @ts-ignore
+        apiKey = import.meta.env.VITE_GOOGLE_API_KEY || import.meta.env.REACT_APP_GOOGLE_API_KEY;
+    }
+  } catch (e) {
+      // Ignora erro se import.meta não existir
   }
-  // Fallback or throw custom error handled by caller
-  throw new Error("API Key não encontrada");
+
+  // Fallback para process.env (Node/Webpack) se apiKey ainda for undefined
+  if (!apiKey && typeof process !== 'undefined' && process.env) {
+    apiKey = process.env.API_KEY;
+  }
+
+  if (apiKey) {
+     return new GoogleGenAI({ apiKey });
+  }
+  
+  // Se não encontrar, lança erro (será capturado pelo componente)
+  throw new Error("Chave da API do Google (VITE_GOOGLE_API_KEY) não encontrada.");
 };
 
 export const decomposeTask = async (taskTitle: string): Promise<string[]> => {
